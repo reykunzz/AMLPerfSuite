@@ -12,6 +12,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -180,6 +181,15 @@ static void H_glDeleteTextures(GLsizei n, const GLuint* textures)
     o_glDeleteTextures(n, textures);
 }
 
+static void MakeReadable(void* addr)
+{
+    // Android 10+ arm64: kode library sistem execute-only. Tambahkan izin baca
+    // supaya AML bisa membaca prolog fungsi sebelum memasang hook.
+    long ps = sysconf(_SC_PAGESIZE);
+    uintptr_t page = (uintptr_t)addr & ~(uintptr_t)(ps - 1);
+    mprotect((void*)page, (size_t)ps * 2, PROT_READ | PROT_EXEC);
+}
+
 static bool InstallHook(const char* lib, const char* sym, void* hook, void** orig)
 {
     void* h = dlopen(lib, RTLD_NOW);
@@ -189,6 +199,7 @@ static bool InstallHook(const char* lib, const char* sym, void* hook, void** ori
         logger->Error("Simbol %s tidak ditemukan di %s", sym, lib);
         return false;
     }
+    MakeReadable(addr);
     bool ok = aml->Hook(addr, hook, orig);
     logger->Info("Hook %s : %s", sym, ok ? "OK" : "GAGAL");
     return ok;
