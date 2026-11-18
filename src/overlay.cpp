@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-#include "font5x7.h"
+#include "gtafont.h"
 #include "menu.h"
 #include "perf.h"
 
@@ -27,7 +27,8 @@ struct Gfx
 };
 Gfx gGfx;
 
-enum { ATLAS_W = 128, ATLAS_H = 64, CELL_W = 6, CELL_H = 8, WHITE_CELL = 64 };
+// Metrik teks logis (tidak berubah dari versi sebelumnya): 1 huruf = 6 x 7 satuan.
+enum { CELL_W = 6 };
 
 const char* kVS =
     "attribute vec2 aPos;\n"
@@ -48,7 +49,8 @@ const char* kFS =
     "varying vec2 vUV;\n"
     "varying vec4 vCol;\n"
     "void main(){\n"
-    "  gl_FragColor = vec4(vCol.rgb, vCol.a * texture2D(uTex, vUV).a);\n"
+    "  vec4 t = texture2D(uTex, vUV);\n"
+    "  gl_FragColor = vec4(mix(vec3(0.0), vCol.rgb, t.r), vCol.a * t.a);\n"   // t.r = isi huruf, t.a = isi + outline
     "}\n";
 
 GLuint Compile(GLenum type, const char* src)
@@ -101,23 +103,9 @@ bool CreateGfx(EGLContext ctx)
     g.locRes = glGetUniformLocation(g.prog, "uRes");
     g.locTex = glGetUniformLocation(g.prog, "uTex");
 
-    // atlas font (kanal alpha saja)
-    static unsigned char atlas[ATLAS_W * ATLAS_H];
-    memset(atlas, 0, sizeof(atlas));
-    for(int c = 0; c < 64; ++c)
-    {
-        int cx = (c % 16) * CELL_W, cy = (c / 16) * CELL_H;
-        for(int col = 0; col < 5; ++col)
-            for(int row = 0; row < 7; ++row)
-                if(kFont5x7[c][col] & (1 << row))
-                    atlas[(cy + row) * ATLAS_W + cx + col] = 255;
-    }
-    {
-        int cx = (WHITE_CELL % 16) * CELL_W, cy = (WHITE_CELL / 16) * CELL_H;
-        for(int y = 0; y < CELL_H; ++y)
-            for(int x = 0; x < CELL_W; ++x)
-                atlas[(cy + y) * ATLAS_W + cx + x] = 255;
-    }
+    // atlas font GTA (LUMINANCE_ALPHA: L = isi huruf, A = isi + outline hitam)
+    std::vector<unsigned char> atlas((size_t)gtafont::AW * gtafont::AH * 2);
+    gtafont::BuildAtlas(atlas.data());
 
     GLint prevTex = 0, prevAlign = 4;
     GLint prevActive = 0;
@@ -129,9 +117,9 @@ bool CreateGfx(EGLContext ctx)
     glGenTextures(1, &g.tex);
     glBindTexture(GL_TEXTURE_2D, g.tex);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_ALPHA, ATLAS_W, ATLAS_H, 0, GL_ALPHA, GL_UNSIGNED_BYTE, atlas);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE_ALPHA, gtafont::AW, gtafont::AH, 0, GL_LUMINANCE_ALPHA, GL_UNSIGNED_BYTE, atlas.data());
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
@@ -169,33 +157,33 @@ void Quad(float x0, float y0, float x1, float y1, float u0, float v0, float u1, 
 
 void Rect(float x, float y, float w, float h, const Col& c)
 {
-    float cx = (WHITE_CELL % 16) * CELL_W + CELL_W * 0.5f;
-    float cy = (WHITE_CELL / 16) * CELL_H + CELL_H * 0.5f;
-    float u = cx / ATLAS_W, v = cy / ATLAS_H;
+    float u, v;
+    gtafont::WhiteUV(&u, &v);
     Quad(x, y, x + w, y + h, u, v, u, v, c);
 }
 
+// Satu huruf: kotak logis 5 x 7 satuan (x, y = pojok kiri-atas). Quad digambar sedikit lebih
+// besar supaya outline dan kemiringan ikut tergambar.
 void Glyph(float x, float y, char ch, float s, const Col& c)
 {
+    using namespace gtafont;
     if(ch >= 'a' && ch <= 'z') ch = (char)(ch - 32);
     if(ch < 0x20 || ch > 0x5F) ch = '?';
     int idx = ch - 0x20;
     if(idx == 0) return;
-    float tx = (float)((idx % 16) * CELL_W), ty = (float)((idx / 16) * CELL_H);
-    Quad(x, y, x + 5 * s, y + 7 * s,
-         tx / ATLAS_W, ty / ATLAS_H, (tx + 5) / ATLAS_W, (ty + 7) / ATLAS_H, c);
+
+    const float k = s / (float)K;                  // piksel layar per piksel atlas
+    const float cx = (float)((idx % COLS) * CW), cy = (float)((idx / COLS) * CH);
+    Quad(x - PADL * k, y - PADT * k, x + (CW - PADL) * k, y + (CH - PADT) * k,
+         (cx + 0.5f) / AW, (cy + 0.5f) / AH, (cx + CW - 0.5f) / AW, (cy + CH - 0.5f) / AH, c);
 }
 
+// Outline hitam sudah menyatu di atlas, jadi cukup satu lintasan.
 void Text(float x, float y, const char* str, float s, const Col& c, float alpha)
 {
-    Col shadow = {0, 0, 0, 0.9f * alpha};
     Col fg = WithAlpha(c, alpha);
-    for(int pass = 0; pass < 2; ++pass)
-    {
-        float ox = x + (pass == 0 ? s : 0), oy = y + (pass == 0 ? s : 0);
-        for(const char* p = str; *p; ++p, ox += CELL_W * s)
-            Glyph(ox, oy, *p, s, pass == 0 ? shadow : fg);
-    }
+    for(const char* p = str; *p; ++p, x += CELL_W * s)
+        Glyph(x, y, *p, s, fg);
 }
 
 float TextWidth(const char* str, float s) { return (float)strlen(str) * CELL_W * s; }

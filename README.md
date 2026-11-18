@@ -1,5 +1,7 @@
 # AML Performance Suite (GTA SA Android)
 
+**Author : ReyyXSA** · versi 1.1.0
+
 Satu plugin untuk [AndroidModLoader](https://github.com/RusJJ/AndroidModLoader) yang berisi semua fitur kategori **Performance**:
 
 | Fitur | Cara kerja |
@@ -92,3 +94,27 @@ src/overlay.cpp   renderer overlay GLES2 (teks bitmap 5x7, panel, grafik)
 src/config.cpp    parser .ini, preset, nilai default
 Android.mk / Application.mk   ndk-build (armeabi-v7a + arm64-v8a, API 21, c++_static)
 ```
+
+## Menu di dalam game
+
+Ketuk tombol **MENU** di layar untuk membuka panel pengaturan. Semua perubahan disimpan otomatis ke `.ini`.
+
+| Tab | Isi |
+|---|---|
+| DISPLAY | Mode overlay, pojok, ukuran & kepekatan teks, grafik |
+| STATS | Baris statistik yang ditampilkan |
+| PERF | Preset, batas FPS, adaptive limiter, Low Memory Mode |
+| SYSTEM | Monitor GL (butuh restart), toast, posisi tombol, simpan / reset |
+| INFO | Changelog + penjelasan fungsi tiap pengaturan (4 halaman, ketuk teks atau tombol `<` `>`) |
+
+## Changelog
+
+### v1.1.0
+- Tampilan menu bergaya GTA SA (panel hitam, bingkai & aksen emas, toggle hijau/merah).
+- Font bergaya GTA (tebal, miring, outline hitam) untuk menu dan overlay. Dibangkitkan saat runtime dari bitmap 5x7, **bukan** file font asli Rockstar.
+- Nama author tampil di header menu dan di metadata mod AML.
+- Tab **INFO**: changelog dan penjelasan fungsi tiap baris pengaturan.
+- Nilai panjang di kotak menu mengecil otomatis agar muat.
+
+### v1.0.0
+- Rilis awal: FPS, frame time, grafik, RAM, memori aplikasi, draw call, memori tekstur, limiter FPS, preset, Low Memory Mode, overlay, dan menu sentuh.

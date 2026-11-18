@@ -24,8 +24,10 @@
 #include "menu.h"
 #include "overlay.h"
 #include "perf.h"
+#include "version.h"
 
-MYMOD(net.amlperf.suite, AML Performance Suite, 1.0.0, AMLPerf)
+// Token MYMOD (tanpa tanda kutip) harus sama dengan nilai di version.h.
+MYMOD(net.amlperf.suite, AML Performance Suite, 1.1.0, ReyyXSA)
 #ifndef AMLPERF_ANY_GAME
 NEEDGAME(com.rockstargames.gtasa)
 #endif
@@ -373,5 +375,5 @@ ON_MOD_LOAD()
     else
         Menu_SetInputOk(false);
 
-    PerfLog("AML Performance Suite 1.0.0 dimuat. Config: %s", ini);
+    PerfLog("AML Performance Suite %s by %s dimuat. Config: %s", AMLPERF_VERSION, AMLPERF_AUTHOR, ini);
 }
