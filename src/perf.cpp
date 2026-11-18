@@ -234,7 +234,10 @@ void UpdateLowMemory(int64_t now)
         typedef int (*TrimFn)(size_t);
         static TrimFn trim = (TrimFn)dlsym(RTLD_DEFAULT, "malloc_trim");
         if(trim) trim(0);
-        mallopt(M_PURGE, 0);
+        // mallopt hanya dideklarasikan di header untuk API >= 26, jadi dicari saat runtime.
+        typedef int (*MalloptFn)(int, int);
+        static MalloptFn mopt = (MalloptFn)dlsym(RTLD_DEFAULT, "mallopt");
+        if(mopt) mopt(M_PURGE, 0);
     }
 }
 
