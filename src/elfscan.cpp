@@ -46,9 +46,11 @@ bool In(const LibSpan& s, const void* p, size_t n)
 } // namespace
 
 bool Elf_ScanLoadedLib(const char* libSubstr, const char* filter1, const char* filter2,
-                       const char* exact, ElfScanResult& out)
+                       const char* exact, const char* prefer, ElfScanResult& out)
 {
     out.libFound = false;
+    out.preferAddr = 0;
+    out.preferName[0] = 0;
     out.totalSyms = out.hitCount = out.stored = 0;
     out.exactAddr = 0;
 
@@ -129,6 +131,12 @@ bool Elf_ScanLoadedLib(const char* libSubstr, const char* filter1, const char* f
         uintptr_t addr = s.bias + (uintptr_t)y.st_value;
 
         if(exact && !out.exactAddr && strcmp(buf, exact) == 0) out.exactAddr = addr;
+
+        if(prefer && *prefer && !out.preferAddr && strstr(buf, prefer))
+        {
+            out.preferAddr = addr;
+            snprintf(out.preferName, sizeof(out.preferName), "%s", buf);
+        }
 
         bool match = (filter1 && *filter1 && strcasestr(buf, filter1)) ||
                      (filter2 && *filter2 && strcasestr(buf, filter2));

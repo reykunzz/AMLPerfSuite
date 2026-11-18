@@ -238,14 +238,16 @@ static bool InstallTouchHook(const Settings& u)
     // Pindai tabel simbol libGTASA.so langsung dari memori (tanpa API AML).
     ElfScanResult* r = new ElfScanResult();
     const char* exact = u.touchSymbol.empty() ? nullptr : u.touchSymbol.c_str();
-    bool scanned = Elf_ScanLoadedLib("libGTASA.so", "touch", "AND_", exact, *r);
+    // Log hanya simbol "TouchEvent" dan fungsi JNI (Java_...) agar daftarnya ringkas;
+    // AND_TouchEvent dicari di SEMUA simbol lewat parameter 'prefer'.
+    bool scanned = Elf_ScanLoadedLib("libGTASA.so", "TouchEvent", "Java_", exact, "AND_TouchEvent", *r);
 
     if(!scanned)
         PerfLog("Pemindaian simbol libGTASA.so GAGAL (library %s, simbol %d)",
                 r->libFound ? "ditemukan" : "tidak ditemukan", r->totalSyms);
     else
     {
-        PerfLog("libGTASA.so: base=0x%lX, %d simbol, %d cocok 'touch'/'AND_'",
+        PerfLog("libGTASA.so: base=0x%lX, %d simbol, %d cocok 'TouchEvent'/'Java_'",
                 (unsigned long)r->bias, r->totalSyms, r->hitCount);
         for(int i = 0; i < r->stored; ++i)
             PerfLog("  sym %s  +0x%lX", r->hits[i].name, (unsigned long)(r->hits[i].addr - r->bias));
@@ -259,17 +261,13 @@ static bool InstallTouchHook(const Settings& u)
         addr = r->exactAddr;
         snprintf(how, sizeof(how), "simbol %s", exact);
     }
-    if(!addr && scanned)
+    if(!addr && scanned && r->preferAddr)
     {
-        // cari "AND_TouchEvent" apa pun bentuk mangling-nya
-        for(int i = 0; i < r->stored; ++i)
-            if(strstr(r->hits[i].name, "AND_TouchEvent"))
-            {
-                addr = r->hits[i].addr;
-                snprintf(how, sizeof(how), "simbol %s", r->hits[i].name);
-                break;
-            }
+        addr = r->preferAddr;
+        snprintf(how, sizeof(how), "simbol %s", r->preferName);
     }
+    else if(scanned)
+        PerfLog("AND_TouchEvent TIDAK ada di tabel simbol libGTASA.so.");
     if(!addr && gGame)
     {
         unsigned off = BYBIT(u.touchOffset32, u.touchOffset64);
