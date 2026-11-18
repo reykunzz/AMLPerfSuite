@@ -1,0 +1,277 @@
+// AML Performance Suite untuk GTA San Andreas Android
+// Satu plugin berisi: FPS Counter, Frame Time Monitor, RAM Monitor, Memory Usage Monitor,
+// Draw Call Monitor, Texture Memory Monitor, Performance Graph, Dynamic FPS Limiter,
+// Low Memory Mode, Performance Preset, dan Performance Overlay.
+//
+// Hanya file ini yang memakai API AML. Modul lain (config/perf/overlay) murni C++ + GLES2.
+
+#include <mod/amlmod.h>
+#include <mod/logger.h>
+
+#include <dlfcn.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+#include <EGL/egl.h>
+#include <GLES2/gl2.h>
+
+#include "config.h"
+#include "overlay.h"
+#include "perf.h"
+
+MYMOD(net.amlperf.suite, AML Performance Suite, 1.0.0, AMLPerf)
+#ifndef AMLPERF_ANY_GAME
+NEEDGAME(com.rockstargames.gtasa)
+#endif
+
+static uintptr_t gGame = 0;
+
+// ---------------------------------------------------------------- jembatan ke modul lain
+void PerfLog(const char* fmt, ...)
+{
+    char buf[256];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    logger->Info("%s", buf);
+}
+
+void PerfToast(const char* fmt, ...)
+{
+    char buf[128];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    aml->ShowToast(false, "%s", buf);
+}
+
+// Alamat float "LOD distance scale" milik game (opsional, lihat [GameTuning] di .ini).
+void Game_ApplyLodScale(float scale, const Settings& s)
+{
+    static uintptr_t addr = 0;
+    static bool resolved = false;
+    static bool haveOrig = false;
+    static float orig = 1.0f;
+
+    if(!resolved)
+    {
+        resolved = true;
+        if(gGame)
+        {
+            unsigned off = BYBIT(s.lodScaleOffset32, s.lodScaleOffset64);
+            if(off) addr = gGame + off;
+            else if(!s.lodScaleSymbol.empty()) addr = aml->GetSym(gGame, s.lodScaleSymbol.c_str());
+        }
+        if(addr) logger->Info("LOD scale address = 0x%X", (unsigned)addr);
+    }
+    if(!addr) return;
+
+    if(scale < 0.0f)                      // kembalikan nilai asli
+    {
+        if(haveOrig) aml->WriteFloat(addr, orig);
+        return;
+    }
+    if(!haveOrig) { orig = aml->ReadFloat(addr); haveOrig = true; }
+    aml->WriteFloat(addr, scale);
+}
+
+// ---------------------------------------------------------------- hook EGL / GL
+static EGLBoolean (*o_eglSwapBuffers)(EGLDisplay, EGLSurface) = nullptr;
+static void (*o_glDrawElements)(GLenum, GLsizei, GLenum, const void*) = nullptr;
+static void (*o_glDrawArrays)(GLenum, GLint, GLsizei) = nullptr;
+static void (*o_glTexImage2D)(GLenum, GLint, GLint, GLsizei, GLsizei, GLint, GLenum, GLenum, const void*) = nullptr;
+static void (*o_glCompressedTexImage2D)(GLenum, GLint, GLenum, GLsizei, GLsizei, GLint, GLsizei, const void*) = nullptr;
+static void (*o_glDeleteTextures)(GLsizei, const GLuint*) = nullptr;
+
+static EGLBoolean H_eglSwapBuffers(EGLDisplay dpy, EGLSurface surf)
+{
+    Perf_OnFrame(Perf_NowNs());
+    Overlay_Draw(dpy, surf);
+    EGLBoolean r = o_eglSwapBuffers(dpy, surf);
+    Perf_AfterSwap();
+    return r;
+}
+
+static void H_glDrawElements(GLenum mode, GLsizei count, GLenum type, const void* indices)
+{
+    if(!Overlay_IsDrawing()) Perf_CountDraw(count);
+    o_glDrawElements(mode, count, type, indices);
+}
+
+static void H_glDrawArrays(GLenum mode, GLint first, GLsizei count)
+{
+    if(!Overlay_IsDrawing()) Perf_CountDraw(count);
+    o_glDrawArrays(mode, first, count);
+}
+
+static size_t BytesPerPixel(GLenum format, GLenum type)
+{
+    switch(type)
+    {
+        case GL_UNSIGNED_SHORT_5_6_5:
+        case GL_UNSIGNED_SHORT_4_4_4_4:
+        case GL_UNSIGNED_SHORT_5_5_5_1:
+            return 2;
+        case GL_UNSIGNED_BYTE:
+            switch(format)
+            {
+                case GL_ALPHA:
+                case GL_LUMINANCE:       return 1;
+                case GL_LUMINANCE_ALPHA: return 2;
+                case GL_RGB:             return 3;
+                case GL_RGBA:            return 4;
+                default:                 return 4;
+            }
+        default:
+            return 4;
+    }
+}
+
+static bool TexSlot(GLenum target, GLint level, GLenum* bindingQuery, int* slot)
+{
+    if(target == GL_TEXTURE_2D)
+    {
+        *bindingQuery = GL_TEXTURE_BINDING_2D;
+        *slot = level;
+        return true;
+    }
+    if(target >= GL_TEXTURE_CUBE_MAP_POSITIVE_X && target <= GL_TEXTURE_CUBE_MAP_NEGATIVE_Z)
+    {
+        *bindingQuery = GL_TEXTURE_BINDING_CUBE_MAP;
+        *slot = level + (int)(target - GL_TEXTURE_CUBE_MAP_POSITIVE_X) * 32;
+        return true;
+    }
+    return false;
+}
+
+static void H_glTexImage2D(GLenum target, GLint level, GLint ifmt, GLsizei w, GLsizei h, GLint border,
+                           GLenum format, GLenum type, const void* pixels)
+{
+    o_glTexImage2D(target, level, ifmt, w, h, border, format, type, pixels);
+    if(Overlay_IsDrawing()) return;
+
+    GLenum query; int slot;
+    if(!TexSlot(target, level, &query, &slot)) return;
+    GLint id = 0;
+    glGetIntegerv(query, &id);
+    Perf_TexSet((unsigned)id, slot, (size_t)w * (size_t)h * BytesPerPixel(format, type));
+}
+
+static void H_glCompressedTexImage2D(GLenum target, GLint level, GLenum ifmt, GLsizei w, GLsizei h,
+                                     GLint border, GLsizei imageSize, const void* data)
+{
+    o_glCompressedTexImage2D(target, level, ifmt, w, h, border, imageSize, data);
+
+    GLenum query; int slot;
+    if(!TexSlot(target, level, &query, &slot)) return;
+    GLint id = 0;
+    glGetIntegerv(query, &id);
+    Perf_TexSet((unsigned)id, slot, (size_t)imageSize);
+}
+
+static void H_glDeleteTextures(GLsizei n, const GLuint* textures)
+{
+    for(GLsizei i = 0; i < n && textures; ++i) Perf_TexDelete(textures[i]);
+    o_glDeleteTextures(n, textures);
+}
+
+static bool InstallHook(const char* lib, const char* sym, void* hook, void** orig)
+{
+    void* h = dlopen(lib, RTLD_NOW);
+    void* addr = h ? dlsym(h, sym) : nullptr;
+    if(!addr)
+    {
+        logger->Error("Simbol %s tidak ditemukan di %s", sym, lib);
+        return false;
+    }
+    bool ok = aml->Hook(addr, hook, orig);
+    logger->Info("Hook %s : %s", sym, ok ? "OK" : "GAGAL");
+    return ok;
+}
+
+// ---------------------------------------------------------------- jalur konfigurasi
+static void MakeDirs(const char* path)
+{
+    char tmp[512];
+    snprintf(tmp, sizeof(tmp), "%s", path);
+    for(char* p = tmp + 1; *p; ++p)
+    {
+        if(*p == '/')
+        {
+            *p = 0;
+            mkdir(tmp, 0777);
+            *p = '/';
+        }
+    }
+    mkdir(tmp, 0777);
+}
+
+static void PrepareConfig(char* outIni, size_t n)
+{
+    const char* base = aml->GetAndroidDataPath();
+    char dir[400];
+    if(base && *base)
+    {
+        size_t len = strlen(base);
+        snprintf(dir, sizeof(dir), "%s%sAMLPerfSuite", base, (base[len - 1] == '/') ? "" : "/");
+    }
+    else snprintf(dir, sizeof(dir), "/sdcard/Android/data/com.rockstargames.gtasa/files/AMLPerfSuite");
+
+    MakeDirs(dir);
+    snprintf(outIni, n, "%s/AMLPerfSuite.ini", dir);
+
+    if(access(outIni, F_OK) != 0)
+    {
+        FILE* f = fopen(outIni, "wb");
+        if(f)
+        {
+            fwrite(kDefaultIni, 1, strlen(kDefaultIni), f);
+            fclose(f);
+            logger->Info("Konfigurasi default dibuat: %s", outIni);
+        }
+        else logger->Error("Gagal membuat konfigurasi di %s", outIni);
+    }
+}
+
+// ---------------------------------------------------------------- siklus hidup mod
+ON_MOD_PRELOAD()
+{
+    logger->SetTag("AMLPerfSuite");
+}
+
+ON_MOD_LOAD()
+{
+    logger->SetTag("AMLPerfSuite");
+    gGame = aml->GetLib("libGTASA.so");
+
+    char ini[512];
+    PrepareConfig(ini, sizeof(ini));
+    Perf_Init(ini);
+
+    // Inti plugin: semua fitur menumpang di hook ini.
+    if(!InstallHook("libEGL.so", "eglSwapBuffers", (void*)H_eglSwapBuffers, (void**)&o_eglSwapBuffers))
+    {
+        logger->Error("eglSwapBuffers gagal di-hook, plugin tidak aktif.");
+        return;
+    }
+
+    const Settings& u = g_perf.user;
+    if(u.drawCallMonitor)
+    {
+        InstallHook("libGLESv2.so", "glDrawElements", (void*)H_glDrawElements, (void**)&o_glDrawElements);
+        InstallHook("libGLESv2.so", "glDrawArrays",   (void*)H_glDrawArrays,   (void**)&o_glDrawArrays);
+    }
+    if(u.textureMemoryMonitor)
+    {
+        InstallHook("libGLESv2.so", "glTexImage2D",           (void*)H_glTexImage2D,           (void**)&o_glTexImage2D);
+        InstallHook("libGLESv2.so", "glCompressedTexImage2D", (void*)H_glCompressedTexImage2D, (void**)&o_glCompressedTexImage2D);
+        InstallHook("libGLESv2.so", "glDeleteTextures",       (void*)H_glDeleteTextures,       (void**)&o_glDeleteTextures);
+    }
+
+    logger->Info("AML Performance Suite 1.0.0 dimuat. Config: %s", ini);
+}

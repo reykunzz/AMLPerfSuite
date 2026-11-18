@@ -1,0 +1,7 @@
+obj/
+libs/
+out/
+dist/
+third_party/
+include/mod/
+*.zip
