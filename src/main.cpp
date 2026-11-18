@@ -20,6 +20,7 @@
 #include <GLES2/gl2.h>
 
 #include "config.h"
+#include "elfscan.h"
 #include "menu.h"
 #include "overlay.h"
 #include "perf.h"
@@ -208,12 +209,12 @@ static bool InstallHook(const char* lib, const char* sym, void* hook, void** ori
     void* addr = h ? dlsym(h, sym) : nullptr;
     if(!addr)
     {
-        logger->Error("Simbol %s tidak ditemukan di %s", sym, lib);
+        PerfLog("Simbol %s tidak ditemukan di %s", sym, lib);
         return false;
     }
     MakeReadable(addr);
     bool ok = aml->Hook(addr, hook, orig);
-    logger->Info("Hook %s : %s", sym, ok ? "OK" : "GAGAL");
+    PerfLog("Hook %s : %s", sym, ok ? "OK" : "GAGAL");
     return ok;
 }
 
@@ -232,45 +233,58 @@ static void H_Touch(uintptr_t a0, uintptr_t a1, uintptr_t a2, uintptr_t a3,
 
 static bool InstallTouchHook(const Settings& u)
 {
-    if(!gGame)
+    PerfLog("Hook sentuhan: mencari fungsi di libGTASA.so (gGame=0x%lX) ...", (unsigned long)gGame);
+
+    // Pindai tabel simbol libGTASA.so langsung dari memori (tanpa API AML).
+    ElfScanResult* r = new ElfScanResult();
+    const char* exact = u.touchSymbol.empty() ? nullptr : u.touchSymbol.c_str();
+    bool scanned = Elf_ScanLoadedLib("libGTASA.so", "touch", "AND_", exact, *r);
+
+    if(!scanned)
+        PerfLog("Pemindaian simbol libGTASA.so GAGAL (library %s, simbol %d)",
+                r->libFound ? "ditemukan" : "tidak ditemukan", r->totalSyms);
+    else
     {
-        logger->Error("libGTASA.so tidak ditemukan, hook sentuhan dilewati.");
-        return false;
+        PerfLog("libGTASA.so: base=0x%lX, %d simbol, %d cocok 'touch'/'AND_'",
+                (unsigned long)r->bias, r->totalSyms, r->hitCount);
+        for(int i = 0; i < r->stored; ++i)
+            PerfLog("  sym %s  +0x%lX", r->hits[i].name, (unsigned long)(r->hits[i].addr - r->bias));
     }
 
     uintptr_t addr = 0;
-    const char* how = "";
-    char how2[160];
+    char how[200] = {0};
 
-    if(!u.touchSymbol.empty())
+    if(exact && r->exactAddr)
     {
-        addr = (uintptr_t)aml->GetSym(gGame, u.touchSymbol.c_str());
-        snprintf(how2, sizeof(how2), "simbol %s", u.touchSymbol.c_str());
-        how = how2;
+        addr = r->exactAddr;
+        snprintf(how, sizeof(how), "simbol %s", exact);
     }
-    if(!addr)
+    if(!addr && scanned)
     {
-        static const char* kNames[] = {"_Z13AND_TouchEventiiii", "AND_TouchEvent", "_Z13AND_TouchEventiiiiii"};
-        for(const char* n : kNames)
-        {
-            addr = (uintptr_t)aml->GetSym(gGame, n);
-            if(addr) { snprintf(how2, sizeof(how2), "simbol %s", n); how = how2; break; }
-        }
+        // cari "AND_TouchEvent" apa pun bentuk mangling-nya
+        for(int i = 0; i < r->stored; ++i)
+            if(strstr(r->hits[i].name, "AND_TouchEvent"))
+            {
+                addr = r->hits[i].addr;
+                snprintf(how, sizeof(how), "simbol %s", r->hits[i].name);
+                break;
+            }
     }
-    if(!addr)
+    if(!addr && gGame)
     {
         unsigned off = BYBIT(u.touchOffset32, u.touchOffset64);
-        if(off) { addr = gGame + off; snprintf(how2, sizeof(how2), "offset 0x%X", off); how = how2; }
+        if(off) { addr = gGame + off; snprintf(how, sizeof(how), "offset 0x%X", off); }
     }
+    delete r;
+
     if(!addr)
     {
-        logger->Error("Fungsi sentuhan tidak ditemukan. Isi [Menu] TouchSymbol / TouchOffset di .ini.");
+        PerfLog("Fungsi sentuhan TIDAK ditemukan. Kirim log ini; atau isi [Menu] TouchSymbol / TouchOffset di .ini.");
         return false;
     }
 
     MakeReadable((void*)addr);
     bool ok = aml->Hook((void*)addr, (void*)H_Touch, (void**)&o_Touch);
-    logger->Info("Hook sentuhan (%s) : %s", how, ok ? "OK" : "GAGAL");
     PerfLog("Hook sentuhan (%s) : %s", how, ok ? "OK" : "GAGAL");
     return ok && o_Touch;
 }

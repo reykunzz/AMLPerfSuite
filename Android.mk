@@ -7,7 +7,7 @@ AML_ROOT ?= $(LOCAL_PATH)/third_party/AndroidModLoader
 include $(CLEAR_VARS)
 
 LOCAL_MODULE    := AMLPerfSuite
-LOCAL_SRC_FILES := src/main.cpp src/config.cpp src/perf.cpp src/overlay.cpp src/menu.cpp
+LOCAL_SRC_FILES := src/main.cpp src/config.cpp src/perf.cpp src/overlay.cpp src/menu.cpp src/elfscan.cpp
 
 # Implementasi `logger` / Logger::Info dkk. ada di source AML (mod/logger.cpp),
 # header-nya saja tidak cukup: harus ikut dikompilasi ke plugin.
