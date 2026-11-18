@@ -20,6 +20,7 @@
 #include <GLES2/gl2.h>
 
 #include "config.h"
+#include "menu.h"
 #include "overlay.h"
 #include "perf.h"
 
@@ -29,6 +30,16 @@ NEEDGAME(com.rockstargames.gtasa)
 #endif
 
 static uintptr_t gGame = 0;
+static char gLogPath[512] = {0};
+
+static void FileLog(const char* line)
+{
+    if(!gLogPath[0]) return;
+    FILE* f = fopen(gLogPath, "ab");
+    if(!f) return;
+    fprintf(f, "%s\n", line);
+    fclose(f);
+}
 
 // ---------------------------------------------------------------- jembatan ke modul lain
 void PerfLog(const char* fmt, ...)
@@ -39,6 +50,7 @@ void PerfLog(const char* fmt, ...)
     vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
     logger->Info("%s", buf);
+    FileLog(buf);
 }
 
 void PerfToast(const char* fmt, ...)
@@ -205,6 +217,64 @@ static bool InstallHook(const char* lib, const char* sym, void* hook, void** ori
     return ok;
 }
 
+// ---------------------------------------------------------------- hook sentuhan (menu)
+// Fungsi sentuhan GTA SA: AND_TouchEvent(int type, int id, int x, int y).
+// Hook dibuat meneruskan 8 argumen mentah supaya aman bila tanda tangan aslinya sedikit berbeda.
+typedef void (*TouchFn)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
+static TouchFn o_Touch = nullptr;
+
+static void H_Touch(uintptr_t a0, uintptr_t a1, uintptr_t a2, uintptr_t a3,
+                    uintptr_t a4, uintptr_t a5, uintptr_t a6, uintptr_t a7)
+{
+    if(Menu_OnTouch((int)a0, (int)a1, (int)a2, (int)a3)) return;   // dipakai menu: jangan teruskan ke game
+    o_Touch(a0, a1, a2, a3, a4, a5, a6, a7);
+}
+
+static bool InstallTouchHook(const Settings& u)
+{
+    if(!gGame)
+    {
+        logger->Error("libGTASA.so tidak ditemukan, hook sentuhan dilewati.");
+        return false;
+    }
+
+    uintptr_t addr = 0;
+    const char* how = "";
+    char how2[160];
+
+    if(!u.touchSymbol.empty())
+    {
+        addr = (uintptr_t)aml->GetSym(gGame, u.touchSymbol.c_str());
+        snprintf(how2, sizeof(how2), "simbol %s", u.touchSymbol.c_str());
+        how = how2;
+    }
+    if(!addr)
+    {
+        static const char* kNames[] = {"_Z13AND_TouchEventiiii", "AND_TouchEvent", "_Z13AND_TouchEventiiiiii"};
+        for(const char* n : kNames)
+        {
+            addr = (uintptr_t)aml->GetSym(gGame, n);
+            if(addr) { snprintf(how2, sizeof(how2), "simbol %s", n); how = how2; break; }
+        }
+    }
+    if(!addr)
+    {
+        unsigned off = BYBIT(u.touchOffset32, u.touchOffset64);
+        if(off) { addr = gGame + off; snprintf(how2, sizeof(how2), "offset 0x%X", off); how = how2; }
+    }
+    if(!addr)
+    {
+        logger->Error("Fungsi sentuhan tidak ditemukan. Isi [Menu] TouchSymbol / TouchOffset di .ini.");
+        return false;
+    }
+
+    MakeReadable((void*)addr);
+    bool ok = aml->Hook((void*)addr, (void*)H_Touch, (void**)&o_Touch);
+    logger->Info("Hook sentuhan (%s) : %s", how, ok ? "OK" : "GAGAL");
+    PerfLog("Hook sentuhan (%s) : %s", how, ok ? "OK" : "GAGAL");
+    return ok && o_Touch;
+}
+
 // ---------------------------------------------------------------- jalur konfigurasi
 static void MakeDirs(const char* path)
 {
@@ -235,6 +305,8 @@ static void PrepareConfig(char* outIni, size_t n)
 
     MakeDirs(dir);
     snprintf(outIni, n, "%s/AMLPerfSuite.ini", dir);
+    snprintf(gLogPath, sizeof(gLogPath), "%s/AMLPerfSuite.log", dir);
+    if(FILE* lf = fopen(gLogPath, "wb")) fclose(lf);     // log baru tiap start game
 
     if(access(outIni, F_OK) != 0)
     {
@@ -284,5 +356,10 @@ ON_MOD_LOAD()
         InstallHook("libGLESv2.so", "glDeleteTextures",       (void*)H_glDeleteTextures,       (void**)&o_glDeleteTextures);
     }
 
-    logger->Info("AML Performance Suite 1.0.0 dimuat. Config: %s", ini);
+    if(u.menuEnabled)
+        Menu_SetInputOk(InstallTouchHook(u));
+    else
+        Menu_SetInputOk(false);
+
+    PerfLog("AML Performance Suite 1.0.0 dimuat. Config: %s", ini);
 }

@@ -58,6 +58,11 @@ void Perf_TexDelete(unsigned texId);
 
 int64_t Perf_NowNs();
 
+// Dipakai menu dalam game (thread render): terapkan g_perf.user yang baru diubah,
+// dan simpan ke file .ini (komentar dipertahankan, tanpa memicu muat-ulang).
+void Perf_ApplySettings();
+bool Perf_SaveConfig();
+
 // Diimplementasikan di main.cpp (satu-satunya file yang menyentuh API AML).
 void PerfLog(const char* fmt, ...);
 void PerfToast(const char* fmt, ...);

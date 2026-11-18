@@ -291,6 +291,20 @@ void Perf_Init(const char* iniPath)
     PerfLog("Siap. Preset=%s Limit=%d Overlay=%d", Config_PresetName(s.preset), g_perf.cfg.fpsLimit, s.overlayMode);
 }
 
+void Perf_ApplySettings()
+{
+    RecomputeEffective();
+}
+
+bool Perf_SaveConfig()
+{
+    if(!gIniPath[0]) return false;
+    bool ok = Config_Save(gIniPath, g_perf.user);
+    gIniMTime = FileMTime(gIniPath);   // jangan muat ulang file yang baru kita tulis sendiri
+    PerfLog("Konfigurasi %s", ok ? "disimpan" : "GAGAL disimpan");
+    return ok;
+}
+
 void Perf_CountDraw(int verts)
 {
     gDraws.fetch_add(1, std::memory_order_relaxed);

@@ -52,6 +52,17 @@ struct Settings
     unsigned    lodScaleOffset64 = 0;
     std::string lodScaleSymbol;
     float       lodScale = -1.0f;   // diisi oleh preset; <0 = jangan diubah
+
+    // ---- Menu dalam game ----
+    bool        menuEnabled = true;
+    int         menuButtonPos = 4;  // 0 kiri-atas, 1 kanan-atas, 2 kiri-bawah, 3 kanan-bawah, 4 tengah-atas
+    bool        menuDebug = false;  // tampilkan titik & nilai sentuhan terakhir
+    int         touchDownType = 2;  // nilai "type" pada AND_TouchEvent: jari menyentuh layar
+    int         touchUpType = 1;    //                                    jari diangkat
+    int         touchMoveType = 3;  //                                    jari bergeser
+    std::string touchSymbol;        // nama simbol fungsi sentuhan di libGTASA.so (kosong = otomatis)
+    unsigned    touchOffset32 = 0;  // alternatif: offset dari base libGTASA.so (sertakan +1 bila Thumb)
+    unsigned    touchOffset64 = 0;
 };
 
 extern const char* kDefaultIni;
@@ -60,6 +71,10 @@ extern const char* kDefaultIni;
 bool Config_Load(const char* path, Settings& out);
 
 // Salin pengaturan + timpa nilai performa sesuai preset / low-memory.
+// Tulis pengaturan ke file .ini. Komentar & urutan file yang sudah ada dipertahankan;
+// hanya nilai tiap kunci yang diperbarui (kunci yang belum ada ditambahkan).
+bool Config_Save(const char* path, const Settings& s);
+
 Settings Config_Effective(const Settings& user, bool lowMemActive);
 
 const char* Config_PresetName(int preset);

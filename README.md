@@ -62,6 +62,19 @@ $ANDROID_NDK_HOME/ndk-build NDK_PROJECT_PATH=. APP_BUILD_SCRIPT=Android.mk NDK_A
 
 Bila package GTA SA kamu bukan `com.rockstargames.gtasa`, buka `Android.mk` dan aktifkan `-DAMLPERF_ANY_GAME`.
 
+## Menu di dalam game
+
+Ketuk tombol **MENU** kecil di layar (default: tengah-atas) untuk membuka panel pengaturan dengan 4 tab:
+DISPLAY (overlay & grafik), STATS (baris yang ditampilkan), PERF (preset, limiter FPS, Low Memory),
+SYSTEM (monitor GL, posisi tombol, simpan / reset). Perubahan langsung berlaku dan otomatis
+disimpan ke `AMLPerfSuite.ini` (komentar di file tetap utuh). Tanda `*` = perlu restart game.
+
+Menu memakai hook fungsi sentuhan game (`AND_TouchEvent`). Bila tombol tampil merah "NO TOUCH",
+hook-nya tidak ketemu: lihat `AMLPerfSuite.log` di folder yang sama dengan `.ini`, lalu isi
+`[Menu] TouchSymbol` atau `TouchOffset64`. Bila tombol bisa diketuk tapi tidak merespons, set
+`[Menu] Debug = 1` dan sesuaikan `TouchDownType` / `TouchUpType` / `TouchMoveType` dengan nilai
+`type` yang tertulis di log (12 sentuhan pertama dicatat).
+
 ## Catatan penting
 
 - **Limiter hanya menurunkan FPS.** Batas atas ditentukan game; GTA SA umumnya berjalan 30 FPS, jadi nilai 45/60 baru berguna bila game/mod lain sudah menaikkan FPS-nya.

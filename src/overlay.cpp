@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "font5x7.h"
+#include "menu.h"
 #include "perf.h"
 
 namespace
@@ -434,12 +435,61 @@ void RestoreState(const SavedState& s)
 }
 } // namespace
 
+// ---------------------------------------------------------------- jembatan ke menu
+static void PaintRect(float x, float y, float w, float h, float r, float g, float b, float a)
+{
+    Rect(x, y, w, h, Col{r, g, b, a});
+}
+
+static void PaintText(float x, float y, const char* str, float s, float r, float g, float b, float a)
+{
+    Text(x, y, str, s, Col{r, g, b, 1.0f}, a);
+}
+
+static float PaintTextWidth(const char* str, float s) { return TextWidth(str, s); }
+
 bool Overlay_IsDrawing() { return tlDrawing; }
+
+// Geometri overlay statistik (teks + grafik) ke gV.
+static void BuildOverlayGeometry(const Settings& c, int screenW, int screenH)
+{
+    std::vector<Line> lines;
+    BuildLines(lines);
+
+    const float s = c.overlayScale;
+    const float pad = 3 * s;
+    const float lineH = 9 * s;
+    float textW = 0;
+    for(auto& l : lines) textW = fmaxf(textW, TextWidth(l.text, s));
+
+    const bool graph = c.overlayMode == 2 && c.showGraph && g_perf.histCount > 1;
+    float graphH = 20 * s;
+    float graphW = fmaxf(textW, c.graphSamples * fmaxf(1.0f, s * 0.5f));
+    float boxW = fmaxf(textW, graph ? graphW : 0) + pad * 2;
+    float boxH = lines.size() * lineH + pad * 2 + (graph ? graphH + pad : 0);
+    if(lines.empty() && !graph) return;
+
+    float bx = (float)c.overlayMargin;
+    float by = (float)c.overlayMargin;
+    if(c.overlayCorner == 1 || c.overlayCorner == 3) bx = screenW - c.overlayMargin - boxW;
+    if(c.overlayCorner == 2 || c.overlayCorner == 3) by = screenH - c.overlayMargin - boxH;
+
+    Rect(bx, by, boxW, boxH, Col{0, 0, 0, 0.40f * c.overlayOpacity});
+
+    float ty = by + pad;
+    for(auto& l : lines)
+    {
+        Text(bx + pad, ty, l.text, s, l.col, c.overlayOpacity);
+        ty += lineH;
+    }
+    if(graph)
+        BuildGraph(bx + pad, ty + pad * 0.5f, boxW - pad * 2, graphH, s, c.overlayOpacity);
+}
 
 void Overlay_Draw(EGLDisplay dpy, EGLSurface surf)
 {
-    const Settings& c = g_perf.cfg;
-    if(c.overlayMode == 0 || gGfx.failed) return;
+    const bool wantMenu = g_perf.user.menuEnabled;
+    if((g_perf.cfg.overlayMode == 0 && !wantMenu) || gGfx.failed) return;
 
     EGLContext ctx = eglGetCurrentContext();
     if(ctx == EGL_NO_CONTEXT) return;
@@ -473,39 +523,19 @@ void Overlay_Draw(EGLDisplay dpy, EGLSurface surf)
     }
 
     // ---- susun geometri ----
-    std::vector<Line> lines;
-    BuildLines(lines);
-
-    const float s = c.overlayScale;
-    const float pad = 3 * s;
-    const float lineH = 9 * s;
-    float textW = 0;
-    for(auto& l : lines) textW = fmaxf(textW, TextWidth(l.text, s));
-
-    const bool graph = c.overlayMode == 2 && c.showGraph && g_perf.histCount > 1;
-    float graphH = 20 * s;
-    float graphW = fmaxf(textW, c.graphSamples * fmaxf(1.0f, s * 0.5f));
-    float boxW = fmaxf(textW, graph ? graphW : 0) + pad * 2;
-    float boxH = lines.size() * lineH + pad * 2 + (graph ? graphH + pad : 0);
-    if(lines.empty() && !graph) { RestoreState(st); tlDrawing = false; return; }
-
-    float bx = (float)c.overlayMargin;
-    float by = (float)c.overlayMargin;
-    if(c.overlayCorner == 1 || c.overlayCorner == 3) bx = gGfx.w - c.overlayMargin - boxW;
-    if(c.overlayCorner == 2 || c.overlayCorner == 3) by = gGfx.h - c.overlayMargin - boxH;
-
     gV.clear();
-    gV.reserve(2048);
-    Rect(bx, by, boxW, boxH, Col{0, 0, 0, 0.40f * c.overlayOpacity});
+    gV.reserve(4096);
 
-    float ty = by + pad;
-    for(auto& l : lines)
+    const Settings& c = g_perf.cfg;
+    if(c.overlayMode != 0) BuildOverlayGeometry(c, gGfx.w, gGfx.h);
+
+    if(wantMenu)
     {
-        Text(bx + pad, ty, l.text, s, l.col, c.overlayOpacity);
-        ty += lineH;
+        static const MenuPainter painter = {PaintRect, PaintText, PaintTextWidth};
+        Menu_Frame(gGfx.w, gGfx.h, painter);
     }
-    if(graph)
-        BuildGraph(bx + pad, ty + pad * 0.5f, boxW - pad * 2, graphH, s, c.overlayOpacity);
+
+    if(gV.empty()) { RestoreState(st); tlDrawing = false; return; }
 
     // ---- gambar ----
     glBindFramebuffer(GL_FRAMEBUFFER, 0);

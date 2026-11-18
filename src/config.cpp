@@ -6,6 +6,7 @@
 #include <string.h>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 const char* kDefaultIni =
 "; ============================================================\n"
@@ -83,7 +84,24 @@ const char* kDefaultIni =
 "Enabled = 0\n"
 "LodScaleOffset32 = 0\n"
 "LodScaleOffset64 = 0\n"
-"LodScaleSymbol =\n";
+"LodScaleSymbol =\n"
+"\n"
+"[Menu]\n"
+"; Menu pengaturan di dalam game. Ketuk tombol MENU di layar untuk membuka.\n"
+"Enabled = 1\n"
+"; Posisi tombol: 0 kiri-atas, 1 kanan-atas, 2 kiri-bawah, 3 kanan-bawah, 4 tengah-atas\n"
+"Button = 4\n"
+"; 1 = tampilkan titik & nilai sentuhan terakhir (untuk memeriksa input)\n"
+"Debug = 0\n"
+"; Nilai 'type' sentuhan dari game: jari turun / naik / geser.\n"
+"; Ubah bila menu tidak merespons (lihat Debug dan file AMLPerfSuite.log).\n"
+"TouchDownType = 2\n"
+"TouchUpType = 1\n"
+"TouchMoveType = 3\n"
+"; Fungsi sentuhan libGTASA.so. Kosong = coba nama bawaan. Atau isi offset (hex).\n"
+"TouchSymbol =\n"
+"TouchOffset32 = 0\n"
+"TouchOffset64 = 0\n";
 
 namespace
 {
@@ -247,7 +265,160 @@ bool Config_Load(const char* path, Settings& s)
     s.lodScaleOffset64 = GetUInt(kv, "gametuning.lodscaleoffset64", 0);
     s.lodScaleSymbol   = GetStr(kv, "gametuning.lodscalesymbol", "");
 
+    s.menuEnabled   = GetBool(kv, "menu.enabled", d.menuEnabled);
+    s.menuButtonPos = Clampi(GetInt(kv, "menu.button", d.menuButtonPos), 0, 4);
+    s.menuDebug     = GetBool(kv, "menu.debug", d.menuDebug);
+    s.touchDownType = GetInt(kv, "menu.touchdowntype", d.touchDownType);
+    s.touchUpType   = GetInt(kv, "menu.touchuptype", d.touchUpType);
+    s.touchMoveType = GetInt(kv, "menu.touchmovetype", d.touchMoveType);
+    s.touchSymbol   = GetStr(kv, "menu.touchsymbol", "");
+    s.touchOffset32 = GetUInt(kv, "menu.touchoffset32", 0);
+    s.touchOffset64 = GetUInt(kv, "menu.touchoffset64", 0);
+
     return f != nullptr;
+}
+
+// ---------------------------------------------------------------- simpan
+namespace
+{
+struct Entry { const char* sec; const char* key; std::string val; };
+
+std::string Si(int v) { return std::to_string(v); }
+std::string Sb(bool v) { return v ? "1" : "0"; }
+std::string Sf(float v) { char b[32]; snprintf(b, sizeof(b), "%.2f", v); return b; }
+std::string Sh(unsigned v) { char b[32]; snprintf(b, sizeof(b), "0x%X", v); return b; }
+
+bool IsHeader(const std::string& t, std::string* name)
+{
+    if(t.empty() || t[0] != '[') return false;
+    size_t close = t.find(']');
+    if(close == std::string::npos) return false;
+    if(name) *name = Lower(Trim(t.substr(1, close - 1)));
+    return true;
+}
+
+void MergeEntry(std::vector<std::string>& lines, const Entry& e)
+{
+    const std::string sec = Lower(e.sec), key = Lower(e.key);
+    const std::string newLine = std::string(e.key) + " = " + e.val;
+
+    int header = -1;
+    for(size_t i = 0; i < lines.size(); ++i)
+    {
+        std::string name;
+        if(IsHeader(Trim(lines[i]), &name) && name == sec) { header = (int)i; break; }
+    }
+    if(header < 0)
+    {
+        if(!lines.empty() && !Trim(lines.back()).empty()) lines.push_back("");
+        lines.push_back(std::string("[") + e.sec + "]");
+        lines.push_back(newLine);
+        return;
+    }
+
+    int lastContent = header;
+    for(size_t i = (size_t)header + 1; i < lines.size(); ++i)
+    {
+        std::string t = Trim(lines[i]);
+        if(IsHeader(t, nullptr)) break;
+        if(!t.empty()) lastContent = (int)i;
+        if(t.empty() || t[0] == ';' || t[0] == '#') continue;
+        size_t eq = t.find('=');
+        if(eq == std::string::npos) continue;
+        if(Lower(Trim(t.substr(0, eq))) == key) { lines[i] = newLine; return; }
+    }
+    lines.insert(lines.begin() + lastContent + 1, newLine);
+}
+} // namespace
+
+bool Config_Save(const char* path, const Settings& s)
+{
+    std::string text;
+    bool existed = false;
+    if(FILE* f = fopen(path, "rb"))
+    {
+        char buf[4096];
+        size_t n;
+        while((n = fread(buf, 1, sizeof(buf), f)) > 0) text.append(buf, n);
+        fclose(f);
+        existed = true;
+    }
+    if(!existed) text = kDefaultIni;
+
+    std::vector<std::string> lines;
+    {
+        size_t p = 0;
+        while(p <= text.size())
+        {
+            size_t e = text.find('\n', p);
+            if(e == std::string::npos) { if(p < text.size()) lines.push_back(text.substr(p)); break; }
+            std::string ln = text.substr(p, e - p);
+            if(!ln.empty() && ln.back() == '\r') ln.pop_back();
+            lines.push_back(ln);
+            p = e + 1;
+        }
+    }
+
+    const Entry entries[] = {
+        {"General", "Preset", Config_PresetName(s.preset)},
+        {"General", "ShowToasts", Sb(s.showToasts)},
+        {"Overlay", "Mode", Si(s.overlayMode)},
+        {"Overlay", "Corner", Si(s.overlayCorner)},
+        {"Overlay", "Scale", Sf(s.overlayScale)},
+        {"Overlay", "Opacity", Sf(s.overlayOpacity)},
+        {"Overlay", "Margin", Si(s.overlayMargin)},
+        {"Overlay", "ShowFPS", Sb(s.showFps)},
+        {"Overlay", "ShowFrameTime", Sb(s.showFrameTime)},
+        {"Overlay", "ShowRAM", Sb(s.showRam)},
+        {"Overlay", "ShowMemoryUsage", Sb(s.showMemUsage)},
+        {"Overlay", "ShowDrawCalls", Sb(s.showDrawCalls)},
+        {"Overlay", "ShowTextureMemory", Sb(s.showTexMem)},
+        {"Overlay", "FpsGood", Si(s.fpsGood)},
+        {"Overlay", "FpsWarn", Si(s.fpsWarn)},
+        {"Graph", "Show", Sb(s.showGraph)},
+        {"Graph", "Mode", Si(s.graphMode)},
+        {"Graph", "Samples", Si(s.graphSamples)},
+        {"Graph", "MaxMs", Sf(s.graphMaxMs)},
+        {"Graph", "MaxFps", Sf(s.graphMaxFps)},
+        {"Monitors", "DrawCallMonitor", Sb(s.drawCallMonitor)},
+        {"Monitors", "TextureMemoryMonitor", Sb(s.textureMemoryMonitor)},
+        {"Limiter", "FpsLimit", Si(s.fpsLimit)},
+        {"Limiter", "Adaptive", Sb(s.adaptiveLimiter)},
+        {"LowMemory", "Mode", Si(s.lowMemMode)},
+        {"LowMemory", "ThresholdMB", Si(s.lowMemThresholdMB)},
+        {"LowMemory", "TrimIntervalSec", Si(s.lowMemTrimSec)},
+        {"Menu", "Enabled", Sb(s.menuEnabled)},
+        {"Menu", "Button", Si(s.menuButtonPos)},
+        {"Menu", "Debug", Sb(s.menuDebug)},
+        {"Menu", "TouchDownType", Si(s.touchDownType)},
+        {"Menu", "TouchUpType", Si(s.touchUpType)},
+        {"Menu", "TouchMoveType", Si(s.touchMoveType)},
+        {"Menu", "TouchSymbol", s.touchSymbol},
+        {"Menu", "TouchOffset32", Sh(s.touchOffset32)},
+        {"Menu", "TouchOffset64", Sh(s.touchOffset64)},
+    };
+    for(const Entry& e : entries) MergeEntry(lines, e);
+
+    std::string out;
+    for(const std::string& l : lines) { out += l; out += '\n'; }
+
+    std::string tmp = std::string(path) + ".tmp";
+    FILE* f = fopen(tmp.c_str(), "wb");
+    if(!f) return false;
+    size_t w = fwrite(out.data(), 1, out.size(), f);
+    fclose(f);
+    if(w != out.size()) { remove(tmp.c_str()); return false; }
+    if(rename(tmp.c_str(), path) != 0)
+    {
+        // beberapa penyimpanan tidak mengizinkan rename menimpa: tulis langsung
+        remove(tmp.c_str());
+        FILE* d = fopen(path, "wb");
+        if(!d) return false;
+        bool ok = fwrite(out.data(), 1, out.size(), d) == out.size();
+        fclose(d);
+        return ok;
+    }
+    return true;
 }
 
 const char* Config_PresetName(int preset)
