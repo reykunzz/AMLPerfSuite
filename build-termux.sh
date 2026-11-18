@@ -61,6 +61,7 @@ else
         -static-libstdc++ \
         -Iinclude -Isrc -I"$AML_ROOT" -I"$AML_ROOT/include" -I"$AML_ROOT/external" -I"$AML_ROOT/ARMPatch" \
         src/main.cpp src/config.cpp src/perf.cpp src/overlay.cpp \
+        "$AML_ROOT/mod/logger.cpp" \
         -L/system/lib64 -llog -lEGL -lGLESv2 -ldl \
         -o out/arm64-v8a/libAMLPerfSuite.so
 fi
