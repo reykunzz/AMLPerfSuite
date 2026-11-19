@@ -1,6 +1,6 @@
 # AML Performance Suite (GTA SA Android)
 
-**Author : ReyyXSA** · versi 1.2.1
+**Author : ReyyXSA** · versi 1.2.2
 
 Satu plugin untuk [AndroidModLoader](https://github.com/RusJJ/AndroidModLoader) yang berisi semua fitur kategori **Performance**:
 
@@ -96,9 +96,13 @@ Batasan: tanpa root, Android bisa menolak prioritas atau afinitas (status `DENIE
 
 ## Font
 
-Menu dan overlay memakai font Roboto yang sudah dirender menjadi atlas di `src/font_data.h` (lisensi SIL OFL, lihat `FONT-LICENSE-Roboto.txt`). Teks di kode ditulis huruf kapital dan diubah otomatis menjadi huruf kalimat saat digambar (`src/font.h`). Untuk mengganti font: `python3 tools/genfont.py /path/font.ttf` lalu build ulang.
+Menu dan overlay memakai font Roboto yang sudah dirender menjadi atlas di `src/font_data.h` (lisensi SIL OFL, lihat `FONT-LICENSE-Roboto.txt`). Teks di kode ditulis huruf kapital dan diubah otomatis menjadi huruf kalimat saat digambar (`src/font.h`). Ganti ketebalan di Termux: `bash tools/setfont.sh tebal --build` (pilihan: `tipis`, `sedang`, `tebal`, `sangat`, atau angka 400-900). Font lain: `python3 tools/genfont.py /path/font.ttf [bobot]`.
 
 ## Changelog
+
+### v1.2.2
+- Font lebih tebal (bobot 650) dan jarak baris overlay sedikit dilonggarkan.
+- Skrip `tools/setfont.sh` untuk mengganti ketebalan font langsung di Termux.
 
 ### v1.2.1
 - **Font baru yang halus** (Roboto, huruf besar-kecil, anti-aliasing) menggantikan font kotak 5x7 di menu dan overlay.

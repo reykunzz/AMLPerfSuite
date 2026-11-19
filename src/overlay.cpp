@@ -452,7 +452,7 @@ static void BuildOverlayGeometry(const Settings& c, int screenW, int screenH)
 
     const float s = c.overlayScale;
     const float pad = 3 * s;
-    const float lineH = 9 * s;
+    const float lineH = 10 * s;
     float textW = 0;
     for(auto& l : lines) textW = fmaxf(textW, TextWidth(l.text, s));
 

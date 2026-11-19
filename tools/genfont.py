@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Membangkitkan src/font_data.h: atlas huruf halus (anti-aliasing) dari Roboto (SIL Open Font License, lihat FONT-LICENSE-Roboto.txt).
-Pakai:  python3 tools/genfont.py /path/Roboto.ttf
+Pakai:  python3 tools/genfont.py /path/Roboto.ttf [bobot 400-900, bawaan 650]
 Atlas disimpan 8-bit alpha, dikompres run-length untuk angka nol (0,n)."""
 import sys
 from PIL import Image, ImageDraw, ImageFont
@@ -10,9 +10,10 @@ EM_PX = 32                 # ukuran font di atlas (piksel)
 EM_UNIT = 10.6             # tinggi em dalam "satuan" teks (1 satuan = 1 piksel font 5x7 lama pada skala 1)
 PAD = 2
 path = sys.argv[1]
+WEIGHT = int(sys.argv[2]) if len(sys.argv) > 2 else 650   # 400 tipis .. 900 sangat tebal
 font = ImageFont.truetype(path, EM_PX)
 try:
-    font.set_variation_by_axes([100, 500])   # Roboto variabel: lebar normal, bobot Medium
+    font.set_variation_by_axes([WEIGHT, 100])   # Roboto variabel: sumbu [bobot, lebar]
 except Exception:
     pass
 asc, desc = font.getmetrics()

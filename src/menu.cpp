@@ -330,8 +330,8 @@ struct InfoPage { const char* title; const char* lines[10]; };
 
 const InfoPage kInfo[] = {
     { "CHANGELOG", {
-        "#V1.2.1 - FONT HALUS",
-        "+ FONT BARU, MUDAH DIBACA",
+        "#V1.2.2 - FONT LEBIH TEBAL",
+        "#V1.2.1 - FONT HALUS BARU",
         "#V1.2.0 - BOOST + MENU BARU",
         "+ FITUR BOOST PERFORMANCE",
         "+ MENU SIMPEL, DI KIRI LAYAR",
