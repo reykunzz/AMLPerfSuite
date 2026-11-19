@@ -28,7 +28,7 @@
 #include "version.h"
 
 // Token MYMOD (tanpa tanda kutip) harus sama dengan nilai di version.h.
-MYMOD(net.amlperf.suite, AML Performance Suite, 1.2.0, ReyyXSA)
+MYMOD(net.amlperf.suite, AML Performance Suite, 1.2.1, ReyyXSA)
 #ifndef AMLPERF_ANY_GAME
 NEEDGAME(com.rockstargames.gtasa)
 #endif

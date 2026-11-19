@@ -242,7 +242,7 @@ void BuildRows()
     // ---- VIEW ----
     gTabs[0] = {
         MakeChoice("OVERLAY", &Settings::overlayMode, {"OFF", "MINI", "FULL"}),
-        MakeChoice("CORNER", &Settings::overlayCorner, {"TOP LEFT", "TOP RIGHT", "BTM LEFT", "BTM RIGHT"}),
+        MakeChoice("CORNER", &Settings::overlayCorner, {"TOP LEFT", "TOP RIGHT", "LOWER LEFT", "LOWER RIGHT"}),
         MakeFloat("TEXT SIZE", &Settings::overlayScale, 1.0f, 6.0f, 0.5f, "%.1f", 1.0f),
         MakeFloat("OPACITY", &Settings::overlayOpacity, 0.1f, 1.0f, 0.1f, "%.0f%%", 100.0f),
         MakeToggle("GRAPH", &Settings::showGraph, true),
@@ -297,10 +297,10 @@ void BuildRows()
 
     // ---- SYS ----
     gTabs[4] = {
-        MakeToggle("DRAW CALL MON", &Settings::drawCallMonitor, false, true),
-        MakeToggle("TEXTURE MON", &Settings::textureMemoryMonitor, false, true),
+        MakeToggle("DRAW MONITOR", &Settings::drawCallMonitor, false, true),
+        MakeToggle("TEXTURE MONITOR", &Settings::textureMemoryMonitor, false, true),
         MakeToggle("TOASTS", &Settings::showToasts),
-        MakeChoice("MENU BUTTON", &Settings::menuButtonPos, {"TOP LEFT", "TOP RIGHT", "BTM LEFT", "BTM RIGHT", "TOP MID"}),
+        MakeChoice("MENU BUTTON", &Settings::menuButtonPos, {"TOP LEFT", "TOP RIGHT", "LOWER LEFT", "LOWER RIGHT", "TOP MID"}),
         MakeAction("SAVE NOW",
             [](char* o, size_t n) { snprintf(o, n, "SAVE NOW"); },
             [](int) { SaveNow(); }),
@@ -324,17 +324,17 @@ void BuildRows()
 
 // ================================================================ halaman INFO
 // Awalan baris:  '#' = judul bagian   '|' = lanjutan/keterangan (redup, menjorok)   '+' = butir.
-// Maksimal 28 karakter per baris (termasuk awalan '|') dan 8 baris per halaman; hanya huruf
-// kapital, angka, dan tanda baca dasar (font bitmap).
+// Maksimal 8 baris per halaman dan lebar teks muat di panel (diperiksa tes). Tulis HURUF KAPITAL:
+// Font_Case() (font.h) mengubahnya menjadi huruf kalimat saat digambar.
 struct InfoPage { const char* title; const char* lines[10]; };
 
 const InfoPage kInfo[] = {
     { "CHANGELOG", {
+        "#V1.2.1 - FONT HALUS",
+        "+ FONT BARU, MUDAH DIBACA",
         "#V1.2.0 - BOOST + MENU BARU",
         "+ FITUR BOOST PERFORMANCE",
-        "+ MENU LEBIH SIMPEL, KECIL",
-        "+ MENU DI SISI KIRI LAYAR",
-        "+ FONT GTA DIHAPUS",
+        "+ MENU SIMPEL, DI KIRI LAYAR",
         "#V1.1.0 - TAB INFO, AUTHOR",
         "#V1.0.0 - RILIS AWAL",
         "+ OVERLAY, LIMITER, PRESET",
@@ -375,7 +375,7 @@ const InfoPage kInfo[] = {
         "TEXT SIZE, OPACITY: UKURAN",
         "|DAN KEPEKATAN OVERLAY.",
         "GRAPH: GRAFIK FRAME/FPS",
-        "DRAW CALL, TEXTURE MON:",
+        "DRAW, TEXTURE MONITOR:",
         "|PEMANTAU GL (* = RESTART)",
         "MENU BUTTON, SAVE, RESET.",
         nullptr } },

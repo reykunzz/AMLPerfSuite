@@ -1,6 +1,6 @@
 # AML Performance Suite (GTA SA Android)
 
-**Author : ReyyXSA** · versi 1.2.0
+**Author : ReyyXSA** · versi 1.2.1
 
 Satu plugin untuk [AndroidModLoader](https://github.com/RusJJ/AndroidModLoader) yang berisi semua fitur kategori **Performance**:
 
@@ -94,12 +94,20 @@ Pengaturan lanjutan ada di `.ini` bagian `[Boost]`: `ThreadPriority`, `BigCores`
 
 Batasan: tanpa root, Android bisa menolak prioritas atau afinitas (status `DENIED` / `N/A`); itu normal dan tidak berbahaya. Saat mode MAX, baris Draw Calls dan Texture Memory di overlay menampilkan `PAUSED`.
 
+## Font
+
+Menu dan overlay memakai font Roboto yang sudah dirender menjadi atlas di `src/font_data.h` (lisensi SIL OFL, lihat `FONT-LICENSE-Roboto.txt`). Teks di kode ditulis huruf kapital dan diubah otomatis menjadi huruf kalimat saat digambar (`src/font.h`). Untuk mengganti font: `python3 tools/genfont.py /path/font.ttf` lalu build ulang.
+
 ## Changelog
+
+### v1.2.1
+- **Font baru yang halus** (Roboto, huruf besar-kecil, anti-aliasing) menggantikan font kotak 5x7 di menu dan overlay.
+- Nama pojok bawah menjadi *Lower left / Lower right*; label monitor GL diperjelas.
 
 ### v1.2.0
 - **Boost Performance** (OFF / ON / MAX) dengan tab BOOST yang menampilkan status tiap komponen.
 - Tampilan menu dibuat lebih polos dan lebih kecil, diletakkan di sisi kiri layar; sentuhan di luar panel diteruskan ke game.
-- **Font GTA dihapus**; kembali ke font bitmap bawaan.
+- **Font GTA dihapus.**
 - Tab INFO diperbarui (changelog + fungsi BOOST).
 
 ### v1.1.0

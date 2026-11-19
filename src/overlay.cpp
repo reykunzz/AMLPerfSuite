@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-#include "font5x7.h"
+#include "font.h"
 #include "boost.h"
 #include "menu.h"
 #include "perf.h"
@@ -28,7 +28,7 @@ struct Gfx
 };
 Gfx gGfx;
 
-enum { ATLAS_W = 128, ATLAS_H = 64, CELL_W = 6, CELL_H = 8, WHITE_CELL = 64 };
+enum { ATLAS_W = FONT_AW, ATLAS_H = FONT_AH };
 
 const char* kVS =
     "attribute vec2 aPos;\n"
@@ -102,23 +102,9 @@ bool CreateGfx(EGLContext ctx)
     g.locRes = glGetUniformLocation(g.prog, "uRes");
     g.locTex = glGetUniformLocation(g.prog, "uTex");
 
-    // atlas font (kanal alpha saja)
+    // atlas font halus (kanal alpha saja), dikompres di font_data.h
     static unsigned char atlas[ATLAS_W * ATLAS_H];
-    memset(atlas, 0, sizeof(atlas));
-    for(int c = 0; c < 64; ++c)
-    {
-        int cx = (c % 16) * CELL_W, cy = (c / 16) * CELL_H;
-        for(int col = 0; col < 5; ++col)
-            for(int row = 0; row < 7; ++row)
-                if(kFont5x7[c][col] & (1 << row))
-                    atlas[(cy + row) * ATLAS_W + cx + col] = 255;
-    }
-    {
-        int cx = (WHITE_CELL % 16) * CELL_W, cy = (WHITE_CELL / 16) * CELL_H;
-        for(int y = 0; y < CELL_H; ++y)
-            for(int x = 0; x < CELL_W; ++x)
-                atlas[(cy + y) * ATLAS_W + cx + x] = 255;
-    }
+    Font_Unpack(atlas);
 
     GLint prevTex = 0, prevAlign = 4;
     GLint prevActive = 0;
@@ -131,8 +117,8 @@ bool CreateGfx(EGLContext ctx)
     glBindTexture(GL_TEXTURE_2D, g.tex);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_ALPHA, ATLAS_W, ATLAS_H, 0, GL_ALPHA, GL_UNSIGNED_BYTE, atlas);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
@@ -170,36 +156,39 @@ void Quad(float x0, float y0, float x1, float y1, float u0, float v0, float u1, 
 
 void Rect(float x, float y, float w, float h, const Col& c)
 {
-    float cx = (WHITE_CELL % 16) * CELL_W + CELL_W * 0.5f;
-    float cy = (WHITE_CELL / 16) * CELL_H + CELL_H * 0.5f;
-    float u = cx / ATLAS_W, v = cy / ATLAS_H;
+    float u = (FONT_WHITE_X + 2.0f) / ATLAS_W, v = (FONT_WHITE_Y + 2.0f) / ATLAS_H;
     Quad(x, y, x + w, y + h, u, v, u, v, c);
 }
 
-void Glyph(float x, float y, char ch, float s, const Col& c)
+// Satu baris teks halus. (x, y) = pojok kiri-atas kotak teks setinggi ~7.5 satuan; s = piksel layar per satuan.
+void DrawRun(float x, float y, const char* str, float s, const Col& c)
 {
-    if(ch >= 'a' && ch <= 'z') ch = (char)(ch - 32);
-    if(ch < 0x20 || ch > 0x5F) ch = '?';
-    int idx = ch - 0x20;
-    if(idx == 0) return;
-    float tx = (float)((idx % 16) * CELL_W), ty = (float)((idx / 16) * CELL_H);
-    Quad(x, y, x + 5 * s, y + 7 * s,
-         tx / ATLAS_W, ty / ATLAS_H, (tx + 5) / ATLAS_W, (ty + 7) / ATLAS_H, c);
+    const float k = s / kFontPxPerUnit;           // piksel atlas -> piksel layar
+    const float base = y + 7.5f * s;              // garis dasar
+    float pen = x;
+    for(const char* p = str; *p; ++p)
+    {
+        const FontGlyph& g = Font_Glyph(*p);
+        if(g.w && g.h)
+        {
+            float x0 = pen + g.ox * k, y0 = base - g.oy * k;
+            Quad(x0, y0, x0 + g.w * k, y0 + g.h * k,
+                 (float)g.x / ATLAS_W, (float)g.y / ATLAS_H,
+                 (float)(g.x + g.w) / ATLAS_W, (float)(g.y + g.h) / ATLAS_H, c);
+        }
+        pen += g.adv * k;
+    }
 }
 
 void Text(float x, float y, const char* str, float s, const Col& c, float alpha)
 {
-    Col shadow = {0, 0, 0, 0.9f * alpha};
-    Col fg = WithAlpha(c, alpha);
-    for(int pass = 0; pass < 2; ++pass)
-    {
-        float ox = x + (pass == 0 ? s : 0), oy = y + (pass == 0 ? s : 0);
-        for(const char* p = str; *p; ++p, ox += CELL_W * s)
-            Glyph(ox, oy, *p, s, pass == 0 ? shadow : fg);
-    }
+    char buf[200];
+    Font_Case(str, buf, sizeof(buf));
+    DrawRun(x + 0.5f * s, y + 0.5f * s, buf, s, Col{0, 0, 0, 0.7f * alpha});   // bayangan tipis
+    DrawRun(x, y, buf, s, WithAlpha(c, alpha));
 }
 
-float TextWidth(const char* str, float s) { return (float)strlen(str) * CELL_W * s; }
+float TextWidth(const char* str, float s) { return Font_Width(str, s); }
 
 // ---------------------------------------------------------------- isi overlay
 struct Line { char text[96]; Col col; };
