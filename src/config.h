@@ -53,6 +53,14 @@ struct Settings
     std::string lodScaleSymbol;
     float       lodScale = -1.0f;   // diisi oleh preset; <0 = jangan diubah
 
+    // ---- Boost performance (lihat boost.h) ----
+    int         boostMode = 1;               // 0 = OFF, 1 = ON, 2 = MAX
+    bool        boostPriority = true;        // naikkan prioritas thread game
+    bool        boostBigCores = true;        // pakai core CPU besar
+    bool        boostPerfHint = true;        // Android Performance Hint
+    bool        boostUnlockVsync = true;     // hanya Mode 2
+    bool        boostPauseMonitors = true;   // hanya Mode 2
+
     // ---- Menu dalam game ----
     bool        menuEnabled = true;
     int         menuButtonPos = 4;  // 0 kiri-atas, 1 kanan-atas, 2 kiri-bawah, 3 kanan-bawah, 4 tengah-atas

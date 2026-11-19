@@ -19,6 +19,7 @@
 #include <EGL/egl.h>
 #include <GLES2/gl2.h>
 
+#include "boost.h"
 #include "config.h"
 #include "elfscan.h"
 #include "menu.h"
@@ -27,7 +28,7 @@
 #include "version.h"
 
 // Token MYMOD (tanpa tanda kutip) harus sama dengan nilai di version.h.
-MYMOD(net.amlperf.suite, AML Performance Suite, 1.1.0, ReyyXSA)
+MYMOD(net.amlperf.suite, AML Performance Suite, 1.2.0, ReyyXSA)
 #ifndef AMLPERF_ANY_GAME
 NEEDGAME(com.rockstargames.gtasa)
 #endif
@@ -106,22 +107,25 @@ static void (*o_glDeleteTextures)(GLsizei, const GLuint*) = nullptr;
 
 static EGLBoolean H_eglSwapBuffers(EGLDisplay dpy, EGLSurface surf)
 {
-    Perf_OnFrame(Perf_NowNs());
+    const int64_t now = Perf_NowNs();
+    Perf_OnFrame(now);
+    Boost_Frame(dpy, now);
     Overlay_Draw(dpy, surf);
     EGLBoolean r = o_eglSwapBuffers(dpy, surf);
     Perf_AfterSwap();
+    Boost_FrameEnd();
     return r;
 }
 
 static void H_glDrawElements(GLenum mode, GLsizei count, GLenum type, const void* indices)
 {
-    if(!Overlay_IsDrawing()) Perf_CountDraw(count);
+    if(!Boost_Lean() && !Overlay_IsDrawing()) Perf_CountDraw(count);
     o_glDrawElements(mode, count, type, indices);
 }
 
 static void H_glDrawArrays(GLenum mode, GLint first, GLsizei count)
 {
-    if(!Overlay_IsDrawing()) Perf_CountDraw(count);
+    if(!Boost_Lean() && !Overlay_IsDrawing()) Perf_CountDraw(count);
     o_glDrawArrays(mode, first, count);
 }
 
@@ -169,7 +173,7 @@ static void H_glTexImage2D(GLenum target, GLint level, GLint ifmt, GLsizei w, GL
                            GLenum format, GLenum type, const void* pixels)
 {
     o_glTexImage2D(target, level, ifmt, w, h, border, format, type, pixels);
-    if(Overlay_IsDrawing()) return;
+    if(Boost_Lean() || Overlay_IsDrawing()) return;
 
     GLenum query; int slot;
     if(!TexSlot(target, level, &query, &slot)) return;
@@ -182,6 +186,7 @@ static void H_glCompressedTexImage2D(GLenum target, GLint level, GLenum ifmt, GL
                                      GLint border, GLsizei imageSize, const void* data)
 {
     o_glCompressedTexImage2D(target, level, ifmt, w, h, border, imageSize, data);
+    if(Boost_Lean()) return;
 
     GLenum query; int slot;
     if(!TexSlot(target, level, &query, &slot)) return;

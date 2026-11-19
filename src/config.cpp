@@ -86,6 +86,20 @@ const char* kDefaultIni =
 "LodScaleOffset64 = 0\n"
 "LodScaleSymbol =\n"
 "\n"
+"[Boost]\n"
+"; Boost performance, membantu game lebih lancar (tanpa root). Tidak menaikkan FPS di atas\n"
+"; batas game sendiri; manfaatnya: lebih sedikit patah-patah dan penurunan FPS.\n"
+"; 0 = mati, 1 = ON (prioritas thread + core besar + performance hint),\n"
+"; 2 = MAX (ON + buka vsync + jeda monitor draw call/tekstur). MAX lebih panas dan boros baterai.\n"
+"Mode = 1\n"
+"; Komponen (berlaku bila Mode >= 1)\n"
+"ThreadPriority = 1\n"
+"BigCores = 1\n"
+"PerfHint = 1\n"
+"; Hanya Mode = 2\n"
+"UnlockVSync = 1\n"
+"PauseMonitors = 1\n"
+"\n"
 "[Menu]\n"
 "; Menu pengaturan di dalam game. Ketuk tombol MENU di layar untuk membuka.\n"
 "Enabled = 1\n"
@@ -265,6 +279,13 @@ bool Config_Load(const char* path, Settings& s)
     s.lodScaleOffset64 = GetUInt(kv, "gametuning.lodscaleoffset64", 0);
     s.lodScaleSymbol   = GetStr(kv, "gametuning.lodscalesymbol", "");
 
+    s.boostMode          = Clampi(GetInt(kv, "boost.mode", d.boostMode), 0, 2);
+    s.boostPriority      = GetBool(kv, "boost.threadpriority", d.boostPriority);
+    s.boostBigCores      = GetBool(kv, "boost.bigcores", d.boostBigCores);
+    s.boostPerfHint      = GetBool(kv, "boost.perfhint", d.boostPerfHint);
+    s.boostUnlockVsync   = GetBool(kv, "boost.unlockvsync", d.boostUnlockVsync);
+    s.boostPauseMonitors = GetBool(kv, "boost.pausemonitors", d.boostPauseMonitors);
+
     s.menuEnabled   = GetBool(kv, "menu.enabled", d.menuEnabled);
     s.menuButtonPos = Clampi(GetInt(kv, "menu.button", d.menuButtonPos), 0, 4);
     s.menuDebug     = GetBool(kv, "menu.debug", d.menuDebug);
@@ -387,6 +408,12 @@ bool Config_Save(const char* path, const Settings& s)
         {"LowMemory", "Mode", Si(s.lowMemMode)},
         {"LowMemory", "ThresholdMB", Si(s.lowMemThresholdMB)},
         {"LowMemory", "TrimIntervalSec", Si(s.lowMemTrimSec)},
+        {"Boost", "Mode", Si(s.boostMode)},
+        {"Boost", "ThreadPriority", Sb(s.boostPriority)},
+        {"Boost", "BigCores", Sb(s.boostBigCores)},
+        {"Boost", "PerfHint", Sb(s.boostPerfHint)},
+        {"Boost", "UnlockVSync", Sb(s.boostUnlockVsync)},
+        {"Boost", "PauseMonitors", Sb(s.boostPauseMonitors)},
         {"Menu", "Enabled", Sb(s.menuEnabled)},
         {"Menu", "Button", Si(s.menuButtonPos)},
         {"Menu", "Debug", Sb(s.menuDebug)},

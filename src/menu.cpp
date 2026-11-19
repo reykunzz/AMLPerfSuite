@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "boost.h"
 #include "config.h"
 #include "perf.h"
 #include "version.h"
@@ -27,6 +28,7 @@ std::atomic<bool> gOpen{false};
 std::atomic<bool> gEnabled{false};
 std::atomic<bool> gInputOk{false};
 std::atomic<int>  gBtnX0{-1}, gBtnY0{-1}, gBtnX1{-1}, gBtnY1{-1};
+std::atomic<int>  gPnX0{-1}, gPnY0{-1}, gPnX1{-1}, gPnY1{-1};   // panel terbuka (sentuhan di luar panel diteruskan ke game)
 std::atomic<int>  gTDown{2}, gTUp{1}, gTMove{3};
 std::atomic<int>  gDbgType{-1}, gDbgId{0}, gDbgX{0}, gDbgY{0};
 std::atomic<int64_t> gDbgAt{0};
@@ -51,7 +53,7 @@ int64_t gConfirmResetAt = 0;
 const int64_t kMs = 1000000LL;
 const int64_t kSec = 1000000000LL;
 
-enum { NTABS = 5, TAB_INFO = 4 };
+enum { NTABS = 6, TAB_INFO = 5 };
 
 enum Target
 {
@@ -102,7 +104,7 @@ void DetachPreset()
 // ================================================================ definisi baris
 struct Row
 {
-    enum Kind { TOGGLE, STEP, ACTION } kind = TOGGLE;
+    enum Kind { TOGGLE, STEP, ACTION, INFO } kind = TOGGLE;
     const char* label = "";
     bool restart = false;
     std::function<void(char*, size_t)> val;   // teks nilai (ACTION: teks tombol)
@@ -193,6 +195,14 @@ Row MakeList(const char* label, int Settings::* m, std::vector<int> vals, const 
     return r;
 }
 
+// Baris hanya-baca: label di kiri, nilai di kanan (mis. status komponen boost).
+Row MakeInfo(const char* label, std::function<void(char*, size_t)> text)
+{
+    Row r; r.kind = Row::INFO; r.label = label;
+    r.val = text;
+    return r;
+}
+
 Row MakeAction(const char* label, std::function<void(char*, size_t)> caption, std::function<void(int)> fn)
 {
     Row r; r.kind = Row::ACTION; r.label = label;
@@ -200,7 +210,7 @@ Row MakeAction(const char* label, std::function<void(char*, size_t)> caption, st
     return r;
 }
 
-const char* kTabNames[NTABS] = {"DISPLAY", "STATS", "PERF", "SYSTEM", "INFO"};
+const char* kTabNames[NTABS] = {"VIEW", "STATS", "PERF", "BOOST", "SYS", "INFO"};
 std::vector<Row> gTabs[NTABS];   // tab INFO tidak punya baris (halaman teks, lihat kInfo)
 bool gRowsBuilt = false;
 
@@ -229,14 +239,14 @@ void BuildRows()
     if(gRowsBuilt) return;
     gRowsBuilt = true;
 
-    // ---- DISPLAY ----
+    // ---- VIEW ----
     gTabs[0] = {
         MakeChoice("OVERLAY", &Settings::overlayMode, {"OFF", "MINI", "FULL"}),
         MakeChoice("CORNER", &Settings::overlayCorner, {"TOP LEFT", "TOP RIGHT", "BTM LEFT", "BTM RIGHT"}),
         MakeFloat("TEXT SIZE", &Settings::overlayScale, 1.0f, 6.0f, 0.5f, "%.1f", 1.0f),
         MakeFloat("OPACITY", &Settings::overlayOpacity, 0.1f, 1.0f, 0.1f, "%.0f%%", 100.0f),
         MakeToggle("GRAPH", &Settings::showGraph, true),
-        MakeChoice("GRAPH TYPE", &Settings::graphMode, {"FRAME TIME", "FPS"}),
+        MakeChoice("GRAPH TYPE", &Settings::graphMode, {"FRAME MS", "FPS"}),
         MakeInt("GRAPH SAMPLES", &Settings::graphSamples, 20, 240, 20),
     };
 
@@ -260,12 +270,37 @@ void BuildRows()
         MakeInt("TRIM EVERY SEC", &Settings::lowMemTrimSec, 5, 120, 5),
     };
 
-    // ---- SYSTEM ----
+    // ---- BOOST: mode + status nyata tiap komponen di perangkat ini ----
     gTabs[3] = {
+        MakeChoice("BOOST", &Settings::boostMode, {"OFF", "ON", "MAX"}, false),
+        MakeInfo("THREAD PRIO", [](char* o, size_t n) {
+            if(g_boost.mode == 0 || !g_perf.user.boostPriority) snprintf(o, n, "OFF");
+            else if(g_boost.prioOk) snprintf(o, n, "NICE %d", g_boost.nice);
+            else snprintf(o, n, "DENIED");
+        }),
+        MakeInfo("BIG CORES", [](char* o, size_t n) {
+            if(g_boost.mode == 0 || !g_perf.user.boostBigCores) snprintf(o, n, "OFF");
+            else if(g_boost.coresOk) Boost_MaskText(g_boost.bigMask, o, n);
+            else snprintf(o, n, "N/A");
+        }),
+        MakeInfo("PERF HINT", [](char* o, size_t n) {
+            if(g_boost.mode == 0 || !g_perf.user.boostPerfHint) snprintf(o, n, "OFF");
+            else snprintf(o, n, "%s", g_boost.hintOk ? "ON" : "N/A");
+        }),
+        MakeInfo("VSYNC", [](char* o, size_t n) {
+            snprintf(o, n, "%s", g_boost.vsyncUnlocked ? "UNLOCKED" : "NORMAL");
+        }),
+        MakeInfo("GL MONITORS", [](char* o, size_t n) {
+            snprintf(o, n, "%s", g_boost.lean ? "PAUSED" : "ACTIVE");
+        }),
+    };
+
+    // ---- SYS ----
+    gTabs[4] = {
         MakeToggle("DRAW CALL MON", &Settings::drawCallMonitor, false, true),
         MakeToggle("TEXTURE MON", &Settings::textureMemoryMonitor, false, true),
         MakeToggle("TOASTS", &Settings::showToasts),
-        MakeChoice("MENU BUTTON", &Settings::menuButtonPos, {"TOP LEFT", "TOP RIGHT", "BTM LEFT", "BTM RIGHT", "TOP CENTER"}),
+        MakeChoice("MENU BUTTON", &Settings::menuButtonPos, {"TOP LEFT", "TOP RIGHT", "BTM LEFT", "BTM RIGHT", "TOP MID"}),
         MakeAction("SAVE NOW",
             [](char* o, size_t n) { snprintf(o, n, "SAVE NOW"); },
             [](int) { SaveNow(); }),
@@ -288,58 +323,61 @@ void BuildRows()
 }
 
 // ================================================================ halaman INFO
-// Awalan baris:  '#' = judul (emas)   '|' = lanjutan/keterangan (redup)   lainnya = teks biasa.
-// Maksimal 34 karakter per baris (setelah awalan) dan 11 baris per halaman; huruf kapital saja.
-struct InfoPage { const char* title; const char* lines[11]; };
+// Awalan baris:  '#' = judul bagian   '|' = lanjutan/keterangan (redup, menjorok)   '+' = butir.
+// Maksimal 28 karakter per baris (termasuk awalan '|') dan 8 baris per halaman; hanya huruf
+// kapital, angka, dan tanda baca dasar (font bitmap).
+struct InfoPage { const char* title; const char* lines[10]; };
 
 const InfoPage kInfo[] = {
     { "CHANGELOG", {
-        "#V1.1.0 - UPDATE TAMPILAN",
-        "+ UI MENU BERGAYA GTA SA",
-        "+ FONT BERGAYA GTA + OUTLINE",
-        "+ NAMA AUTHOR : " AMLPERF_AUTHOR,
-        "+ TAB INFO: CHANGELOG & FUNGSI",
+        "#V1.2.0 - BOOST + MENU BARU",
+        "+ FITUR BOOST PERFORMANCE",
+        "+ MENU LEBIH SIMPEL, KECIL",
+        "+ MENU DI SISI KIRI LAYAR",
+        "+ FONT GTA DIHAPUS",
+        "#V1.1.0 - TAB INFO, AUTHOR",
         "#V1.0.0 - RILIS AWAL",
-        "+ FPS, FRAME TIME, GRAFIK",
-        "+ RAM, MEMORI, DRAW CALL, TEKSTUR",
-        "+ LIMITER FPS, PRESET, LOW MEMORY",
-        "+ OVERLAY DAN MENU SENTUH",
+        "+ OVERLAY, LIMITER, PRESET",
         nullptr } },
-    { "STATS - FUNGSI TIAP BARIS", {
-        "FPS: FRAME PER DETIK.",
-        "|GTA SA NORMALNYA 30 FPS.",
-        "FRAME TIME: DURASI 1 FRAME (MS).",
-        "|MAKIN KECIL = MAKIN HALUS.",
-        "RAM FREE: RAM HP YANG MASIH BEBAS.",
-        "APP MEMORY: RAM YANG DIPAKAI GAME.",
-        "DRAW CALLS: PERINTAH GAMBAR/FRAME.",
-        "|BANYAK = GPU LEBIH BERAT.",
-        "TEXTURE MEM: PERKIRAAN MEMORI",
-        "|TEKSTUR (GAMBAR) DI GPU.",
+    { "STATS - FUNGSI", {
+        "FPS: FRAME/DETIK, GTA SA 30",
+        "FRAME TIME: DURASI 1 FRAME",
+        "|KECIL = HALUS.",
+        "RAM FREE: RAM HP YANG BEBAS",
+        "APP MEMORY: RAM DIPAKAI GAME",
+        "DRAW CALLS: PERINTAH GAMBAR",
+        "|PER FRAME. BANYAK = BERAT.",
+        "TEXTURE MEM: PERKIRAAN GPU",
         nullptr } },
-    { "PERF - FUNGSI TIAP BARIS", {
-        "PRESET: PAKET SETELAN SIAP PAKAI",
-        "|LOW / MEDIUM / HIGH / ULTRA.",
-        "FPS LIMIT: BATAS FPS MAKSIMAL.",
-        "|HANYA MENURUNKAN, TAK MENAIKKAN.",
-        "ADAPTIVE LIMIT: BATAS FPS TURUN",
-        "|NAIK OTOMATIS SESUAI HP.",
-        "LOW MEMORY: HEMAT SAAT RAM TIPIS.",
-        "LOWMEM BELOW MB: AMBANG RAM.",
-        "TRIM EVERY SEC: JEDA PEMBERSIHAN",
-        "|MEMORI SAAT MODE HEMAT AKTIF.",
+    { "PERF - FUNGSI", {
+        "PRESET: PAKET SETELAN",
+        "|LOW SAMPAI ULTRA.",
+        "FPS LIMIT: BATAS FPS MAKS.",
+        "|HANYA MENURUNKAN FPS.",
+        "ADAPTIVE: BATAS TURUN/NAIK",
+        "|OTOMATIS SESUAI HP.",
+        "LOW MEMORY: HEMAT SAAT RAM",
+        "|TIPIS (TRIM MEMORI, 30 FPS)",
         nullptr } },
-    { "DISPLAY & SYSTEM", {
-        "OVERLAY: OFF / MINI / FULL.",
-        "CORNER: POJOK LAYAR OVERLAY.",
-        "TEXT SIZE, OPACITY: UKURAN DAN",
-        "|KEPEKATAN TEKS OVERLAY.",
-        "GRAPH: GRAFIK FRAME TIME / FPS.",
-        "DRAW CALL MON, TEXTURE MON:",
-        "|PEMANTAU GL. * = RESTART GAME.",
-        "MENU BUTTON: POSISI TOMBOL MENU.",
-        "SAVE NOW: SIMPAN PENGATURAN.",
-        "RESET: KEMBALI KE PENGATURAN AWAL.",
+    { "BOOST - FUNGSI", {
+        "ON: PRIORITAS THREAD GAME,",
+        "|CORE BESAR CPU, PERF HINT.",
+        "MAX: ON + BUKA VSYNC +",
+        "|JEDA MONITOR DRAW/TEKSTUR.",
+        "MAX = LEBIH PANAS, BOROS.",
+        "FPS TAK MELEBIHI BATAS GAME.",
+        "|HASIL: LEBIH SEDIKIT LAG.",
+        "CEK STATUS DI TAB BOOST.",
+        nullptr } },
+    { "VIEW DAN SYS - FUNGSI", {
+        "OVERLAY, CORNER: MODE DAN",
+        "|POJOK OVERLAY.",
+        "TEXT SIZE, OPACITY: UKURAN",
+        "|DAN KEPEKATAN OVERLAY.",
+        "GRAPH: GRAFIK FRAME/FPS",
+        "DRAW CALL, TEXTURE MON:",
+        "|PEMANTAU GL (* = RESTART)",
+        "MENU BUTTON, SAVE, RESET.",
         nullptr } },
 };
 const int kInfoPageCount = (int)(sizeof(kInfo) / sizeof(kInfo[0]));
@@ -369,6 +407,7 @@ void Activate(int target)
         std::vector<Row>& rows = gTabs[gTab];
         if(idx < 0 || idx >= (int)rows.size()) return;
         Row& r = rows[idx];
+        if(r.kind == Row::INFO) return;
         if(r.kind == Row::ACTION) { r.change(1); return; }
         r.change(r.kind == Row::TOGGLE ? 1 : (part == 1 ? -1 : 1));
         Perf_ApplySettings();
@@ -400,58 +439,59 @@ void Process(const Ev& e)
 }
 
 // ================================================================ gambar
+// Tampilan sengaja polos: panel gelap, satu warna aksen, tanpa hiasan.
 struct C { float r, g, b, a; };
 
-// Palet bergaya GTA SA: panel hitam, aksen emas/oranye, hijau uang untuk ON.
-const C kPanel   = {0.025f, 0.025f, 0.030f, 0.94f};
-const C kHeader  = {0.085f, 0.065f, 0.030f, 1.00f};
-const C kGold    = {0.96f, 0.76f, 0.20f, 1.00f};
-const C kGoldDim = {0.58f, 0.44f, 0.12f, 1.00f};
-const C kTabOn   = {0.78f, 0.44f, 0.08f, 1.00f};
-const C kTabOff  = {0.13f, 0.11f, 0.08f, 1.00f};
-const C kRowA    = {0.060f, 0.055f, 0.050f, 0.95f};
-const C kRowB    = {0.095f, 0.085f, 0.070f, 0.95f};
-const C kBtn     = {0.22f, 0.18f, 0.10f, 1.00f};
-const C kValBg   = {0.040f, 0.040f, 0.036f, 1.00f};
-const C kOnBg    = {0.10f, 0.30f, 0.10f, 1.00f};
-const C kOffBg   = {0.28f, 0.09f, 0.08f, 1.00f};
-const C kWhite   = {0.98f, 0.97f, 0.94f, 1.00f};
-const C kTan     = {0.88f, 0.83f, 0.70f, 1.00f};
-const C kTanDim  = {0.66f, 0.62f, 0.52f, 1.00f};
-const C kGray    = {0.66f, 0.64f, 0.60f, 1.00f};
-const C kGreen   = {0.55f, 1.00f, 0.50f, 1.00f};
-const C kRed     = {1.00f, 0.50f, 0.45f, 1.00f};
-const C kOrange  = {1.00f, 0.66f, 0.22f, 1.00f};
-const C kCloseBg = {0.62f, 0.11f, 0.09f, 1.00f};
+const C kPanel  = {0.065f, 0.070f, 0.080f, 0.93f};
+const C kLine   = {0.30f, 0.32f, 0.36f, 1.00f};
+const C kAccent = {0.20f, 0.50f, 0.80f, 1.00f};
+const C kHead   = {0.50f, 0.74f, 0.96f, 1.00f};
+const C kText   = {0.90f, 0.92f, 0.94f, 1.00f};
+const C kDim    = {0.56f, 0.59f, 0.64f, 1.00f};
+const C kBtn    = {0.17f, 0.18f, 0.21f, 1.00f};
+const C kValBg  = {0.11f, 0.12f, 0.14f, 1.00f};
+const C kStripe = {1.00f, 1.00f, 1.00f, 0.035f};
+const C kRed    = {1.00f, 0.50f, 0.45f, 1.00f};
+const C kOrange = {1.00f, 0.66f, 0.22f, 1.00f};
 
 struct Ctx
 {
     const MenuPainter* P;
-    float S;   // piksel per "unit"
-    void rect(float x, float y, float w, float h, const C& c, float am = 1.0f) const { P->rect(x, y, w, h, c.r, c.g, c.b, c.a * am); }
-    void text(float x, float y, const char* s, const C& c, float scale = 1.0f) const { P->text(x, y, s, S * scale, c.r, c.g, c.b, c.a); }
-    float tw(const char* s, float scale = 1.0f) const { return P->textWidth(s, S * scale); }
-    void textCenter(float x, float y, float w, float h, const char* s, const C& c, float scale = 1.0f) const
+    float S;        // piksel layar per unit (1 unit = 1 piksel font 5x7)
+    float line;     // tebal garis tipis, dalam piksel
+    void rect(float x, float y, float w, float h, const C& c) const { P->rect(x, y, w, h, c.r, c.g, c.b, c.a); }
+    void text(float x, float y, const char* s, const C& c) const { P->text(x, y, s, S, c.r, c.g, c.b, c.a); }
+    float tw(const char* s) const { return P->textWidth(s, S); }
+    void textCenter(float x, float y, float w, float h, const char* s, const C& c) const
     {
-        text(x + (w - tw(s, scale)) * 0.5f, y + (h - 7 * S * scale) * 0.5f, s, c, scale);
+        text(x + (w - tw(s)) * 0.5f, y + (h - 7 * S) * 0.5f, s, c);
     }
-    // Bingkai tipis (tebal t unit) di dalam kotak x,y,w,h.
-    void frame(float x, float y, float w, float h, float t, const C& c) const
+    void textRight(float xr, float y, float h, const char* s, const C& c) const
     {
-        float b = t * S;
-        rect(x, y, w, b, c); rect(x, y + h - b, w, b, c);
-        rect(x, y + b, b, h - 2 * b, c); rect(x + w - b, y + b, b, h - 2 * b, c);
+        text(xr - tw(s), y + (h - 7 * S) * 0.5f, s, c);
     }
-    void box(float x, float y, float w, float h, const C& fill, const C& border) const
+    void frame(float x, float y, float w, float h, const C& c) const
     {
-        rect(x, y, w, h, fill);
-        frame(x, y, w, h, 1.0f, border);
+        rect(x, y, w, line, c); rect(x, y + h - line, w, line, c);
+        rect(x, y + line, line, h - 2 * line, c); rect(x + w - line, y + line, line, h - 2 * line, c);
     }
 };
 
 void AddHit(float x, float y, float w, float h, int target)
 {
     gHits.push_back(Hit{x, y, x + w, y + h, target});
+}
+
+// Ukuran panel dalam unit.
+const float PW = 190, PH = 150;
+const float RH = 13;            // tinggi satu baris
+const int   MAX_ROWS = 7;
+
+// Skala panel: kecil, tidak lebih dari ±48% tinggi dan ±28% lebar layar.
+float PanelScale(int W, int H)
+{
+    float s = floorf(fminf(0.48f * H / PH, 0.28f * W / PW));
+    return s < 2.0f ? 2.0f : s;
 }
 
 void DrawButton(const Ctx& g, int W, int H, int64_t now)
@@ -471,9 +511,9 @@ void DrawButton(const Ctx& g, int W, int H, int64_t now)
         case 4: x = (W - bw) * 0.5f; break;
         default: break;
     }
-    g.rect(x, y, bw, bh, C{0.03f, 0.03f, 0.04f, 0.62f});
-    g.frame(x, y, bw, bh, 0.8f, ok ? C{kGold.r, kGold.g, kGold.b, 0.70f} : C{kRed.r, kRed.g, kRed.b, 0.8f});
-    g.textCenter(x, y, bw, bh, label, ok ? C{kWhite.r, kWhite.g, kWhite.b, 0.85f} : kRed);
+    g.rect(x, y, bw, bh, C{0.04f, 0.045f, 0.05f, 0.55f});
+    g.frame(x, y, bw, bh, C{kLine.r, kLine.g, kLine.b, 0.7f});
+    g.textCenter(x, y, bw, bh, label, ok ? C{kText.r, kText.g, kText.b, 0.85f} : kRed);
 
     if(ok)
     {
@@ -486,154 +526,157 @@ void DrawButton(const Ctx& g, int W, int H, int64_t now)
     (void)now;
 }
 
-// Ukuran panel dalam unit. Dipakai juga untuk menghitung skala di Menu_Frame.
-const float PW = 220, PH = 166;
-
 void DrawInfoPage(const Ctx& g, float px, float rowsY)
 {
     const float S = g.S;
     const InfoPage& pg = kInfo[gInfoPage];
-    const float lineH = 9.4f;
+    const float areaH = MAX_ROWS * RH;
 
-    g.rect(px + 4 * S, rowsY, (PW - 8) * S, 105 * S, kRowA);
-    g.frame(px + 4 * S, rowsY, (PW - 8) * S, 105 * S, 0.8f, kGoldDim);
+    g.text(px + 6 * S, rowsY + 2 * S, pg.title, kHead);
+    g.rect(px + 6 * S, rowsY + 11.5f * S, (PW - 12) * S, g.line, kLine);
 
-    g.text(px + 8 * S, rowsY + 3 * S, pg.title, kGold);
-    g.rect(px + 8 * S, rowsY + 12 * S, (PW - 16) * S, 0.8f * S, kGoldDim);
-
-    float y = rowsY + 15 * S;
+    float y = rowsY + 14.5f * S;
     for(int i = 0; pg.lines[i]; ++i)
     {
         const char* l = pg.lines[i];
-        const C* col = &kWhite;
-        float x = px + 8 * S;
-        if(l[0] == '#')      { col = &kGold; ++l; }
-        else if(l[0] == '|') { col = &kTanDim; ++l; x += 6 * S; }
-        else if(l[0] == '+') { col = &kTan; }
-        g.text(x, y, l, *col, 0.92f);
-        y += lineH * S * 0.92f;
+        const C* col = &kText;
+        float x = px + 6 * S;
+        if(l[0] == '#')      { col = &kHead; ++l; }
+        else if(l[0] == '|') { col = &kDim; x += 6 * S; ++l; }
+        g.text(x, y, l, *col);
+        y += 9.2f * S;
     }
-    // ketuk area teks = halaman berikutnya
-    AddHit(px + 4 * S, rowsY, (PW - 8) * S, 105 * S, T_NEXT);
+    (void)areaH;
+    AddHit(px + 4 * S, rowsY, (PW - 8) * S, areaH * S, T_NEXT);   // ketuk teks = halaman berikutnya
+}
+
+void DrawRow(const Ctx& g, float px, float ry, int i, Row& r)
+{
+    const float S = g.S;
+    if(i & 1) g.rect(px + 3 * S, ry, (PW - 6) * S, RH * S, kStripe);
+
+    char val[40] = {0};
+    r.val(val, sizeof(val));
+
+    const float xl = px + 6 * S, xr = px + (PW - 6) * S;
+    const float bh = 10 * S, by = ry + 1.5f * S;
+
+    if(r.kind == Row::ACTION)
+    {
+        bool armed = strncmp(val, "TAP", 3) == 0;
+        g.rect(xl, by, xr - xl, bh, armed ? C{0.70f, 0.30f, 0.10f, 1.0f} : kBtn);
+        g.textCenter(xl, by, xr - xl, bh, val, kText);
+        AddHit(px + 3 * S, ry, (PW - 6) * S, RH * S, T_ROW + i * 4);
+        return;
+    }
+
+    char label[40];
+    snprintf(label, sizeof(label), "%s%s", r.label, r.restart ? " *" : "");
+    g.text(xl, ry + (RH - 7) * 0.5f * S, label, kText);
+
+    if(r.kind == Row::INFO)
+    {
+        bool good = strcmp(val, "OFF") != 0 && strcmp(val, "N/A") != 0 && strcmp(val, "DENIED") != 0 && strcmp(val, "NORMAL") != 0 && strcmp(val, "ACTIVE") != 0;
+        g.textRight(xr, ry, RH * S, val, good ? kHead : kDim);
+        return;
+    }
+
+    const float cw = 78 * S;          // lebar area kontrol
+    const float cx = xr - cw;
+    if(r.kind == Row::TOGGLE)
+    {
+        bool on = strcmp(val, "ON") == 0;
+        g.rect(cx, by, cw, bh, on ? kAccent : kValBg);
+        g.textCenter(cx, by, cw, bh, val, on ? kText : kDim);
+        AddHit(px + 3 * S, ry, (PW - 6) * S, RH * S, T_ROW + i * 4);
+    }
+    else
+    {
+        const float bw = 10 * S, vw = 56 * S, gap = 1 * S;
+        g.rect(cx, by, bw, bh, kBtn);
+        g.textCenter(cx, by, bw, bh, "-", kText);
+        AddHit(cx - 2 * S, ry, bw + 3 * S, RH * S, T_ROW + i * 4 + 1);
+
+        g.rect(cx + bw + gap, by, vw, bh, kValBg);
+        g.textCenter(cx + bw + gap, by, vw, bh, val, kText);
+
+        g.rect(cx + bw + gap + vw + gap, by, bw, bh, kBtn);
+        g.textCenter(cx + bw + gap + vw + gap, by, bw, bh, "+", kText);
+        AddHit(cx + bw + gap + vw, ry, bw + 3 * S, RH * S, T_ROW + i * 4 + 2);
+    }
 }
 
 void DrawPanel(const Ctx& g, int W, int H, int64_t now)
 {
     const float S = g.S;
-    const float px = floorf((W - PW * S) * 0.5f), py = floorf((H - PH * S) * 0.5f);
+    // sisi kiri layar, sejajar vertikal di tengah; layar di luar panel tetap bisa dimainkan
+    const float px = floorf(4 * S), py = floorf((H - PH * S) * 0.5f);
+    (void)W;
 
-    g.rect(0, 0, (float)W, (float)H, C{0, 0, 0, 0.55f});
     g.rect(px, py, PW * S, PH * S, kPanel);
-    g.frame(px, py, PW * S, PH * S, 1.2f, kGold);
+    g.frame(px, py, PW * S, PH * S, kLine);
+    gPnX0 = (int)px; gPnY0 = (int)py; gPnX1 = (int)(px + PW * S); gPnY1 = (int)(py + PH * S);
 
-    // ---- header: judul (font GTA), author, versi ----
-    g.rect(px + 1.2f * S, py + 1.2f * S, (PW - 2.4f) * S, 23 * S, kHeader);
-    g.rect(px + 1.2f * S, py + 24 * S, (PW - 2.4f) * S, 0.9f * S, kGold);
-    g.text(px + 7 * S, py + 4 * S, AMLPERF_NAME, kGold, 1.3f);
-
-    char who[48];
-    snprintf(who, sizeof(who), "AUTHOR : %s", AMLPERF_AUTHOR);
-    g.text(px + 7 * S, py + 15.5f * S, who, kTan, 0.85f);
-    char ver[16];
-    snprintf(ver, sizeof(ver), "V%s", AMLPERF_VERSION);
-    g.text(px + (PW - 27) * S - g.tw(ver, 0.85f), py + 15.5f * S, ver, kTanDim, 0.85f);
+    // ---- header ----
+    g.text(px + 6 * S, py + 4 * S, AMLPERF_NAME, kText);
     {
-        float bx = px + (PW - 22) * S, by = py + 4 * S;
-        g.box(bx, by, 16 * S, 14 * S, kCloseBg, C{1.0f, 0.55f, 0.45f, 1.0f});
-        g.textCenter(bx, by, 16 * S, 14 * S, "X", kWhite);
-        float pad = 2 * S;
-        AddHit(bx - pad, by - pad, 16 * S + pad * 2, 14 * S + pad * 2, T_CLOSE);
+        char who[48];
+        snprintf(who, sizeof(who), "AUTHOR : %s", AMLPERF_AUTHOR);
+        g.text(px + 6 * S, py + 13.5f * S, who, kDim);
+        char ver[16];
+        snprintf(ver, sizeof(ver), "V%s", AMLPERF_VERSION);
+        g.text(px + (PW - 6) * S - g.tw(ver), py + 13.5f * S, ver, kDim);
+
+        float bx = px + (PW - 14) * S, by = py + 2 * S, bs = 11 * S;
+        g.textCenter(bx, by, bs, bs, "X", kText);
+        float pad = 3 * S;
+        AddHit(bx - pad, by - pad, bs + pad * 2, bs + pad * 2, T_CLOSE);
     }
+    g.rect(px + 3 * S, py + 23.5f * S, (PW - 6) * S, g.line, kLine);
 
-    // ---- tab ----
+    // ---- tab: lebar menyesuaikan teks ----
     {
-        float ty = py + 27.5f * S, tw = (PW - 8) / (float)NTABS;
+        float sumText = 0;
+        for(int i = 0; i < NTABS; ++i) sumText += g.tw(kTabNames[i]) / S;
+        const float extra = ((PW - 8) - sumText) / NTABS;
+        float tx = px + 4 * S;
+        const float ty = py + 26.5f * S, th = 12 * S;
         for(int i = 0; i < NTABS; ++i)
         {
-            float tx = px + (4 + tw * i) * S;
+            float tw = (g.tw(kTabNames[i]) / S + extra) * S;
             bool on = i == gTab;
-            g.rect(tx + 0.5f * S, ty, (tw - 1) * S, 14 * S, on ? kTabOn : kTabOff);
-            if(on) g.frame(tx + 0.5f * S, ty, (tw - 1) * S, 14 * S, 0.8f, kGold);
-            g.textCenter(tx, ty, tw * S, 14 * S, kTabNames[i], on ? kWhite : kTan, 0.85f);
-            AddHit(tx, ty, tw * S, 14 * S, T_TAB + i);
+            g.rect(tx + 0.5f * S, ty, tw - 1 * S, th, on ? kAccent : kValBg);
+            g.textCenter(tx, ty, tw, th, kTabNames[i], on ? kText : kDim);
+            AddHit(tx, ty, tw, th, T_TAB + i);
+            tx += tw;
         }
     }
 
     // ---- isi tab ----
-    const float rowsY = py + 44.5f * S;
-    const float xl = px + 8 * S, xr = px + (PW - 8) * S;
-
+    const float rowsY = py + 41 * S;
     if(gTab == TAB_INFO)
         DrawInfoPage(g, px, rowsY);
     else
     {
         std::vector<Row>& rows = gTabs[gTab];
-        for(int i = 0; i < (int)rows.size() && i < 7; ++i)
-        {
-            Row& r = rows[i];
-            float ry = rowsY + i * 15 * S;
-            g.rect(px + 4 * S, ry, (PW - 8) * S, 14 * S, (i & 1) ? kRowB : kRowA);
-
-            char val[40] = {0};
-            r.val(val, sizeof(val));
-
-            if(r.kind == Row::ACTION)
-            {
-                bool armed = strncmp(val, "TAP", 3) == 0;
-                g.box(xl, ry + 1 * S, xr - xl, 12 * S, armed ? C{0.70f, 0.28f, 0.08f, 1.0f} : kTabOn, kGold);
-                g.textCenter(xl, ry + 1 * S, xr - xl, 12 * S, val, kWhite);
-                AddHit(px + 4 * S, ry, (PW - 8) * S, 14 * S, T_ROW + i * 4);
-                continue;
-            }
-
-            char label[40];
-            snprintf(label, sizeof(label), "%s%s", r.label, r.restart ? " *" : "");
-            g.text(xl, ry + 3.5f * S, label, kTan);
-
-            const float cw = 94 * S;               // lebar area kontrol
-            const float cx = xr - cw;
-            if(r.kind == Row::TOGGLE)
-            {
-                bool on = strcmp(val, "ON") == 0;
-                g.box(cx, ry + 1 * S, cw, 12 * S, on ? kOnBg : kOffBg, on ? C{0.35f, 0.75f, 0.30f, 1} : C{0.60f, 0.22f, 0.18f, 1});
-                g.textCenter(cx, ry + 1 * S, cw, 12 * S, val, on ? kGreen : kRed);
-                AddHit(px + 4 * S, ry, (PW - 8) * S, 14 * S, T_ROW + i * 4);
-            }
-            else
-            {
-                g.box(cx, ry + 1 * S, 14 * S, 12 * S, kBtn, kGoldDim);
-                g.textCenter(cx, ry + 1 * S, 14 * S, 12 * S, "-", kGold);
-                AddHit(cx - 2 * S, ry, 18 * S, 14 * S, T_ROW + i * 4 + 1);
-
-                g.box(cx + 16 * S, ry + 1 * S, 62 * S, 12 * S, kValBg, C{0.30f, 0.26f, 0.16f, 1});
-                {
-                    // nilai panjang (mis. "TOP CENTER") mengecil otomatis supaya muat di kotaknya
-                    float sc = fminf(1.0f, 56 * S / fmaxf(g.tw(val), 1.0f));
-                    g.textCenter(cx + 16 * S, ry + 1 * S, 62 * S, 12 * S, val, kWhite, sc);
-                }
-
-                g.box(cx + 80 * S, ry + 1 * S, 14 * S, 12 * S, kBtn, kGoldDim);
-                g.textCenter(cx + 80 * S, ry + 1 * S, 14 * S, 12 * S, "+", kGold);
-                AddHit(cx + 78 * S, ry, 18 * S + 2 * S, 14 * S, T_ROW + i * 4 + 2);
-            }
-        }
+        for(int i = 0; i < (int)rows.size() && i < MAX_ROWS; ++i)
+            DrawRow(g, px, rowsY + i * RH * S, i, rows[i]);
     }
 
     // ---- footer ----
-    const float fy = rowsY + 7 * 15 * S + 4 * S;
+    const float fy = rowsY + MAX_ROWS * RH * S + 3 * S;
+    g.rect(px + 3 * S, fy - 2 * S, (PW - 6) * S, g.line, kLine);
     if(gTab == TAB_INFO)
     {
         char pg[32];
-        snprintf(pg, sizeof(pg), "PAGE %d/%d  TAP = NEXT", gInfoPage + 1, kInfoPageCount);
-        g.text(px + 8 * S, fy + 1 * S, pg, kGray);
-        float bx = px + (PW - 8 - 14 - 2 - 14) * S;
-        g.box(bx, fy - 1 * S, 14 * S, 11 * S, kBtn, kGoldDim);
-        g.textCenter(bx, fy - 1 * S, 14 * S, 11 * S, "<", kGold);
-        AddHit(bx - 1 * S, fy - 3 * S, 16 * S, 15 * S, T_PREV);
-        float bx2 = bx + 16 * S;
-        g.box(bx2, fy - 1 * S, 14 * S, 11 * S, kBtn, kGoldDim);
-        g.textCenter(bx2, fy - 1 * S, 14 * S, 11 * S, ">", kGold);
-        AddHit(bx2 - 1 * S, fy - 3 * S, 16 * S, 15 * S, T_NEXT);
+        snprintf(pg, sizeof(pg), "PAGE %d/%d", gInfoPage + 1, kInfoPageCount);
+        g.text(px + 6 * S, fy + 2 * S, pg, kDim);
+        const float bw = 14 * S, bh = 9 * S;
+        float bx2 = px + (PW - 6) * S - bw, bx = bx2 - bw - 2 * S;
+        g.rect(bx, fy + 1 * S, bw, bh, kBtn);  g.textCenter(bx, fy + 1 * S, bw, bh, "<", kText);
+        g.rect(bx2, fy + 1 * S, bw, bh, kBtn); g.textCenter(bx2, fy + 1 * S, bw, bh, ">", kText);
+        AddHit(bx - 2 * S, fy - 1 * S, bw + 4 * S, bh + 4 * S, T_PREV);
+        AddHit(bx2 - 2 * S, fy - 1 * S, bw + 4 * S, bh + 4 * S, T_NEXT);
     }
     else
     {
@@ -641,14 +684,14 @@ void DrawPanel(const Ctx& g, int W, int H, int64_t now)
         if(now - gStatusAt < 3 * kSec && gStatus[0]) snprintf(left, sizeof(left), "%s", gStatus);
         else if(gDirty) snprintf(left, sizeof(left), "UNSAVED...");
         else snprintf(left, sizeof(left), "* = RESTART GAME");
-        g.text(px + 8 * S, fy + 1 * S, left, gDirty ? kOrange : kGray);
+        g.text(px + 6 * S, fy + 2 * S, left, gDirty ? kOrange : kDim);
 
         char right[48] = {0};
-        const C* rc = &kGray;
+        const C* rc = &kDim;
         if(!gInputOk.load()) { snprintf(right, sizeof(right), "NO TOUCH HOOK"); rc = &kRed; }
         else if(U().menuDebug)
             snprintf(right, sizeof(right), "T%d I%d X%d Y%d", gDbgType.load(), gDbgId.load(), gDbgX.load(), gDbgY.load());
-        if(right[0]) g.text(px + (PW - 8) * S - g.tw(right), fy + 1 * S, right, *rc);
+        if(right[0]) g.text(px + (PW - 6) * S - g.tw(right), fy + 2 * S, right, *rc);
     }
 }
 
@@ -684,7 +727,8 @@ bool Menu_OnTouch(int type, int id, int x, int y)
     if(kind == EV_DOWN)
     {
         bool inBtn = x >= gBtnX0.load() && x < gBtnX1.load() && y >= gBtnY0.load() && y < gBtnY1.load();
-        gCaptured[id] = gOpen.load() || inBtn;
+        bool inPanel = gOpen.load() && x >= gPnX0.load() && x < gPnX1.load() && y >= gPnY0.load() && y < gPnY1.load();
+        gCaptured[id] = inPanel || inBtn;
     }
     bool consume = gCaptured[id];
     if(consume)
@@ -722,13 +766,13 @@ void Menu_Frame(int W, int H, const MenuPainter& P)
     {
         gOpen = false;
         gBtnX0 = gBtnY0 = gBtnX1 = gBtnY1 = -1;
+        gPnX0 = gPnY0 = gPnX1 = gPnY1 = -1;
         return;
     }
 
     // 3) gambar
-    float S = floorf(fminf(H / (PH + 4.0f), W * 0.94f / PW));
-    if(S < 2.0f) S = 2.0f;
-    Ctx g{&P, S};
+    const float S = PanelScale(W, H);
+    Ctx g{&P, S, fmaxf(1.0f, floorf(S * 0.5f))};
 
     if(gOpen.load())
     {
@@ -737,6 +781,7 @@ void Menu_Frame(int W, int H, const MenuPainter& P)
     }
     else
     {
+        gPnX0 = gPnY0 = gPnX1 = gPnY1 = -1;
         DrawButton(g, W, H, now);
         if(u.menuDebug) DrawDebugTouch(g, W, H, now);
     }

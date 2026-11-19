@@ -1,6 +1,6 @@
 # AML Performance Suite (GTA SA Android)
 
-**Author : ReyyXSA** · versi 1.1.0
+**Author : ReyyXSA** · versi 1.2.0
 
 Satu plugin untuk [AndroidModLoader](https://github.com/RusJJ/AndroidModLoader) yang berisi semua fitur kategori **Performance**:
 
@@ -16,6 +16,7 @@ Satu plugin untuk [AndroidModLoader](https://github.com/RusJJ/AndroidModLoader) 
 | Dynamic FPS Limiter | 30 / 40 / 45 / 60 (angka lain juga bisa), bisa diubah saat game jalan; mode *Adaptive* turun/naik otomatis |
 | Low Memory Mode | Aktif otomatis bila RAM tersedia < ambang; memangkas heap native + memaksa profil hemat |
 | Performance Preset | Low / Medium / High / Ultra (batas FPS, adaptive, grafik, LOD scale opsional) |
+| Boost Performance | Prioritas thread game, core CPU besar, Android Performance Hint; mode MAX juga membuka vsync dan menjeda monitor GL (lihat bagian *Boost*) |
 | Performance Overlay | Mini (1 baris) atau lengkap, 4 pojok, skala/opasitas bisa diatur; digambar langsung dengan OpenGL ES 2 |
 
 Semua fitur menumpang pada hook `eglSwapBuffers`, jadi **tidak bergantung pada offset `libGTASA.so`** dan berlaku di semua versi GTA SA.
@@ -66,55 +67,46 @@ Bila package GTA SA kamu bukan `com.rockstargames.gtasa`, buka `Android.mk` dan 
 
 ## Menu di dalam game
 
-Ketuk tombol **MENU** kecil di layar (default: tengah-atas) untuk membuka panel pengaturan dengan 4 tab:
-DISPLAY (overlay & grafik), STATS (baris yang ditampilkan), PERF (preset, limiter FPS, Low Memory),
-SYSTEM (monitor GL, posisi tombol, simpan / reset). Perubahan langsung berlaku dan otomatis
-disimpan ke `AMLPerfSuite.ini` (komentar di file tetap utuh). Tanda `*` = perlu restart game.
-
-Menu memakai hook fungsi sentuhan game (`AND_TouchEvent`). Bila tombol tampil merah "NO TOUCH",
-hook-nya tidak ketemu: lihat `AMLPerfSuite.log` di folder yang sama dengan `.ini`, lalu isi
-`[Menu] TouchSymbol` atau `TouchOffset64`. Bila tombol bisa diketuk tapi tidak merespons, set
-`[Menu] Debug = 1` dan sesuaikan `TouchDownType` / `TouchUpType` / `TouchMoveType` dengan nilai
-`type` yang tertulis di log (12 sentuhan pertama dicatat).
-
-## Catatan penting
-
-- **Limiter hanya menurunkan FPS.** Batas atas ditentukan game; GTA SA umumnya berjalan 30 FPS, jadi nilai 45/60 baru berguna bila game/mod lain sudah menaikkan FPS-nya.
-- **Draw Call & Texture Memory Monitor** memakai inline hook pada `libGLESv2.so`. Ini bagian yang paling bergantung pada perangkat. Bila game crash saat start, set `DrawCallMonitor = 0` dan/atau `TextureMemoryMonitor = 0` (berlaku setelah game dijalankan ulang). Memori tekstur adalah *perkiraan* dari ukuran upload, bukan angka resmi driver.
-- **Low Memory Mode** tidak bisa mengecilkan tekstur game. Yang dilakukan: memangkas heap native (`malloc_trim` / `M_PURGE` bila tersedia), memaksa limiter 30 FPS, mematikan grafik, dan (opsional) menurunkan LOD scale.
-- **LOD scale per preset** hanya aktif bila `[GameTuning] Enabled = 1` dan kamu mengisi offset atau nama simbol yang benar untuk versi `libGTASA.so`-mu. Secara bawaan bagian ini tidak menyentuh memori game.
-- Sebagian besar kontrol dilakukan lewat file `.ini` (hot-reload), bukan menu di dalam game.
-
-## Struktur
-
-```
-src/main.cpp      deklarasi mod AML, hook EGL/GL, jalur config, game tuning (satu-satunya file yang memakai API AML)
-src/perf.cpp      statistik frame, memori, limiter, adaptive, low-memory, penghitung GL
-src/overlay.cpp   renderer overlay GLES2 (teks bitmap 5x7, panel, grafik)
-src/config.cpp    parser .ini, preset, nilai default
-Android.mk / Application.mk   ndk-build (armeabi-v7a + arm64-v8a, API 21, c++_static)
-```
-
-## Menu di dalam game
-
-Ketuk tombol **MENU** di layar untuk membuka panel pengaturan. Semua perubahan disimpan otomatis ke `.ini`.
+Ketuk tombol **MENU** di layar untuk membuka panel kecil di **sisi kiri layar**. Sentuhan di luar panel tetap diteruskan ke game, jadi game bisa dimainkan sambil menu terbuka. Semua perubahan disimpan otomatis ke `.ini`.
 
 | Tab | Isi |
 |---|---|
-| DISPLAY | Mode overlay, pojok, ukuran & kepekatan teks, grafik |
+| VIEW | Mode overlay, pojok, ukuran & kepekatan teks, grafik |
 | STATS | Baris statistik yang ditampilkan |
 | PERF | Preset, batas FPS, adaptive limiter, Low Memory Mode |
-| SYSTEM | Monitor GL (butuh restart), toast, posisi tombol, simpan / reset |
-| INFO | Changelog + penjelasan fungsi tiap pengaturan (4 halaman, ketuk teks atau tombol `<` `>`) |
+| BOOST | Mode boost (OFF / ON / MAX) + status nyata tiap komponen di perangkatmu |
+| SYS | Monitor GL (butuh restart), toast, posisi tombol, simpan / reset |
+| INFO | Changelog + penjelasan fungsi tiap pengaturan (5 halaman, ketuk teks atau tombol `<` `>`) |
+
+## Boost
+
+Boost membantu game lebih lancar tanpa root. **Boost tidak bisa menaikkan FPS di atas batas yang dipasang game sendiri** (GTA SA umumnya 30 FPS); manfaatnya adalah berkurangnya patah-patah dan penurunan FPS. Hasilnya bergantung pada perangkat, jadi tab BOOST menampilkan komponen mana yang benar-benar berhasil.
+
+| Mode | Yang dilakukan |
+|---|---|
+| OFF | Tidak melakukan apa pun (pengaturan thread dikembalikan seperti semula) |
+| ON (bawaan) | Naikkan prioritas thread game, batasi thread ke core CPU besar, dan buka sesi Performance Hint Android |
+| MAX | ON + buka kunci vsync (`eglSwapInterval 0`) + jeda pencacah draw call / memori tekstur. Lebih panas dan lebih boros baterai |
+
+Status di tab BOOST: `THREAD PRIO` (NICE -8 / DENIED), `BIG CORES` (mis. 4-7 / N/A), `PERF HINT` (ON / N/A, butuh Android 13+), `VSYNC`, `GL MONITORS`.
+
+Pengaturan lanjutan ada di `.ini` bagian `[Boost]`: `ThreadPriority`, `BigCores`, `PerfHint` (mode ON dan MAX), `UnlockVSync`, `PauseMonitors` (hanya MAX). Matikan komponen yang menurutmu mengganggu.
+
+Batasan: tanpa root, Android bisa menolak prioritas atau afinitas (status `DENIED` / `N/A`); itu normal dan tidak berbahaya. Saat mode MAX, baris Draw Calls dan Texture Memory di overlay menampilkan `PAUSED`.
 
 ## Changelog
 
+### v1.2.0
+- **Boost Performance** (OFF / ON / MAX) dengan tab BOOST yang menampilkan status tiap komponen.
+- Tampilan menu dibuat lebih polos dan lebih kecil, diletakkan di sisi kiri layar; sentuhan di luar panel diteruskan ke game.
+- **Font GTA dihapus**; kembali ke font bitmap bawaan.
+- Tab INFO diperbarui (changelog + fungsi BOOST).
+
 ### v1.1.0
-- Tampilan menu bergaya GTA SA (panel hitam, bingkai & aksen emas, toggle hijau/merah).
-- Font bergaya GTA (tebal, miring, outline hitam) untuk menu dan overlay. Dibangkitkan saat runtime dari bitmap 5x7, **bukan** file font asli Rockstar.
+- Tampilan menu bergaya GTA SA (diganti di v1.2.0).
+- Font bergaya GTA (dihapus di v1.2.0).
 - Nama author tampil di header menu dan di metadata mod AML.
 - Tab **INFO**: changelog dan penjelasan fungsi tiap baris pengaturan.
-- Nilai panjang di kotak menu mengecil otomatis agar muat.
 
 ### v1.0.0
 - Rilis awal: FPS, frame time, grafik, RAM, memori aplikasi, draw call, memori tekstur, limiter FPS, preset, Low Memory Mode, overlay, dan menu sentuh.
